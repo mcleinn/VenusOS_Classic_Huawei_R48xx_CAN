@@ -1,0 +1,87 @@
+--- OverviewHub.qml.orig
++++ OverviewHub.qml
+@@ -12,6 +12,9 @@
+ 	property bool hasAcSolar: hasAcSolarOnIn || hasAcSolarOnOut
+ 	property bool hasDcSolar: sys.pvCharger.power.valid
+ 	property bool hasDcAndAcSolar: hasAcSolar && hasDcSolar
++	// Huawei tile: only while at least one managed charger is switched on, and
++	// only if the "DC Power" box does not need the same slot.
++	property bool hasHuawei: sys.huawei.active.valid && sys.huawei.active.value > 0 && !sys.dcSystem.power.valid
+ 
+ 	title: qsTr("Overview")
+ 					
+@@ -126,6 +129,30 @@
+ 		}
+ 	}
+ 
++	OverviewBox {
++		id: huaweiBox
++		width: 135
++		height: 45
++		visible: hasHuawei
++		title: "AC Charger"
++		color: "#6E4BA0"
++		titleColor: "#7D5CAC"
++
++		anchors {
++			horizontalCenter: multi.horizontalCenter
++			bottom: parent.bottom; bottomMargin: 5
++		}
++
++		values: TileText {
++			// two units: "x+yW" like the PV inverter tile; one unit: the total
++			anchors.centerIn: parent
++			text: sys.huawei.power1.valid
++				? (sys.huawei.power0.valid ? sys.huawei.power0.value : 0).toFixed(0) + "+" + sys.huawei.power1.value.toFixed(0) + "W"
++				: sys.huawei.power.format(0)
++			font.pixelSize: 18
++		}
++	}
++
+ 	OverviewSolarCharger {
+ 		id: blueSolarCharger
+ 
+@@ -181,8 +208,8 @@
+ 
+ 	OverviewEssReason {
+ 		anchors {
+-			bottom: parent.bottom; bottomMargin: dcSystemBox.visible ? battery.height + 15 : 5
+-			horizontalCenter: parent.horizontalCenter; horizontalCenterOffset: dcSystemBox.visible ? -(root.width / 2 - battery.width / 2 - 10)  : 0
++			bottom: parent.bottom; bottomMargin: (dcSystemBox.visible || huaweiBox.visible) ? battery.height + 15 : 5
++			horizontalCenter: parent.horizontalCenter; horizontalCenterOffset: (dcSystemBox.visible || huaweiBox.visible) ? -(root.width / 2 - battery.width / 2 - 10)  : 0
+ 		}
+ 	}
+ 
+@@ -280,7 +307,7 @@
+ 		ballCount: 3
+ 		path: straight
+ 		active: root.active
+-		value: Utils.sign(noNoise(sys.pvCharger.power) + noNoise(sys.vebusDc.power))
++		value: Utils.sign(noNoise(sys.pvCharger.power) + noNoise(sys.vebusDc.power) + noNoise(sys.huawei.power))
+ 		startPointVisible: false
+ 
+ 		anchors {
+@@ -292,6 +319,23 @@
+ 		}
+ 	}
+ 
++	// Huawei tile to battery, drawn like Victron's batteryToDcSystem (charge
++	// power flows from the tile into the battery)
++	OverviewConnection {
++		id: huaweiToBattery
++		ballCount: 2
++		path: straight
++		active: root.active && hasHuawei
++		value: -flow(sys.huawei.power)
++
++		anchors {
++			left: battery.right; leftMargin: -10
++			top: huaweiBox.verticalCenter;
++			right: huaweiBox.left; rightMargin: -10
++			bottom: huaweiBox.verticalCenter
++		}
++	}
++
+ 	OverviewConnection {
+ 		id: batteryToDcSystem
+ 		ballCount: 2

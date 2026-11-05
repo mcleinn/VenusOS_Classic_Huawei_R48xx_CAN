@@ -1,0 +1,4 @@
+# Everything that runs on the Cerbo (BusyBox sh, Python 3.8) must keep LF line endings.
+* text=auto eol=lf
+*.png binary
+*.tgz binary

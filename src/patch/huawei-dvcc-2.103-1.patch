@@ -1,0 +1,198 @@
+--- a/delegates/dvcc.py
++++ b/delegates/dvcc.py
+@@ -11,6 +11,7 @@
+ from ve_utils import exit_on_error
+ 
+ from delegates.base import SystemCalcDelegate
++from delegates.managedcharger import ManagedChargerSubsystem
+ 
+ # Adjust things this often (in seconds)
+ # solar chargers has to switch to HEX mode each time we write a value to its
+@@ -741,6 +742,7 @@
+ 		super(Dvcc, self).__init__()
+ 		self.systemcalc = sc
+ 		self._solarsystem = None
++		self._chargersystem = None
+ 		self._vecan_services = []
+ 		self._timer = None
+ 		self._tickcount = ADJUST
+@@ -807,6 +809,20 @@
+ 				'/N2kDeviceInstance',
+ 				'/Mgmt/Connection',
+ 				'/Settings/BmsPresent']),
++			('com.victronenergy.charger', [
++				'/ProductId',
++				'/Connected',
++				'/State',
++				'/Dc/0/Current',
++				'/Dc/0/Voltage',
++				'/Dc/0/Power',
++				'/Link/NetworkMode',
++				'/Link/ChargeVoltage',
++				'/Link/ChargeCurrent',
++				'/Settings/ChargeCurrentLimit',
++				'/Huawei/Heartbeat',
++				'/Mgmt/Connection',
++				'/Mgmt/ProcessName']),
+ 			('com.victronenergy.vecan',	[
+ 				'/Link/ChargeVoltage',
+ 				'/Link/NetworkMode']),
+@@ -818,7 +834,15 @@
+ 		return [
+ 			('maxchargecurrent', '/Settings/SystemSetup/MaxChargeCurrent', -1, -1, 10000),
+ 			('maxchargevoltage', '/Settings/SystemSetup/MaxChargeVoltage', 0.0, 0.0, 80.0),
+-			('bol', '/Settings/Services/Bol', 0, 0, 7)
++			('bol', '/Settings/Services/Bol', 0, 0, 7),
++			# Managed (Huawei) chargers: 0 = solar, chargers, Multi; 1 = solar, Multi, chargers
++			('chargerpriority', '/Settings/Dvcc/ChargerPriority', 0, 0, 1),
++			# 1 = charger budget includes Multi discharge current (DC-coupled generator path).
++			# Default 0: chargers never exceed the battery's own charge limit.
++			('chargercompensatevebus', '/Settings/Dvcc/ChargerCompensateVebus', 0, 0, 1),
++			# SOC ceiling for the managed chargers (100 = off), with resume hysteresis
++			('chargermaxsoc', '/Settings/Dvcc/ChargerMaxSoc', 90, 0, 100),
++			('chargerresumesoc', '/Settings/Dvcc/ChargerResumeSoc', 85, 0, 100)
+ 		]
+ 
+ 	def set_sources(self, dbusmonitor, settings, dbusservice):
+@@ -827,6 +851,7 @@
+ 		self._solarsystem = SolarChargerSubsystem(dbusmonitor)
+ 		self._inverters = InverterSubsystem(dbusmonitor)
+ 		self._multi = Multi(dbusmonitor, dbusservice)
++		self._chargersystem = ManagedChargerSubsystem(dbusmonitor)
+ 
+ 		self._dbusservice.add_path('/Control/SolarChargeVoltage', value=0)
+ 		self._dbusservice.add_path('/Control/SolarChargeCurrent', value=0)
+@@ -839,6 +864,21 @@
+ 		self._dbusservice.add_path('/Debug/BatteryOperationalLimits/CurrentOffset', value=0, writeable=True)
+ 		self._dbusservice.add_path('/Dvcc/Alarms/FirmwareInsufficient', value=0)
+ 		self._dbusservice.add_path('/Dvcc/Alarms/MultipleBatteries', value=0)
++		# Managed (Huawei) charger stage
++		self._dbusservice.add_path('/Control/ChargerChargeVoltage', value=0)
++		self._dbusservice.add_path('/Control/ChargerChargeCurrent', value=0)
++		self._dbusservice.add_path('/Dvcc/Chargers/Budget', value=None)
++		self._dbusservice.add_path('/Dvcc/Chargers/Count', value=0)
++		self._dbusservice.add_path('/Dvcc/Chargers/SocInhibit', value=0)
++		self._dbusservice.add_path('/Dvcc/Chargers/Active', value=0)
++		# Per-unit power for the overview tile (two units; None when absent)
++		self._dbusservice.add_path('/Dvcc/Chargers/0/Power', value=None)
++		self._dbusservice.add_path('/Dvcc/Chargers/1/Power', value=None)
++
++	def _update_charger_powers(self):
++		powers = self._chargersystem.powers
++		for n in range(2):
++			self._dbusservice['/Dvcc/Chargers/%d/Power' % n] = powers[n] if n < len(powers) else None
+ 
+ 	def device_added(self, service, instance, do_service_change=True):
+ 		service_type = service.split('.')[2]
+@@ -851,6 +891,11 @@
+ 				# added to the inverter collection.
+ 				self._inverters._add_inverter(
+ 					self._solarsystem.add_invertercharger(service))
++		elif service_type == 'charger':
++			if not ManagedChargerSubsystem.is_eligible(self._dbusmonitor, service):
++				return
++			self._chargersystem.add_charger(service)
++			self._dbusservice['/Dvcc/Chargers/Count'] = len(self._chargersystem)
+ 		elif service_type == 'vecan':
+ 			self._vecan_services.append(service)
+ 		elif service_type == 'battery':
+@@ -869,12 +914,18 @@
+ 				self._inverters.remove_inverter(service)
+ 		elif service in self._vecan_services:
+ 			self._vecan_services.remove(service)
++		elif service in self._chargersystem:
++			self._chargersystem.remove_charger(service)
++			self._dbusservice['/Dvcc/Chargers/Count'] = len(self._chargersystem)
++			self._dbusservice['/Dvcc/Chargers/Active'] = self._chargersystem.active_count
++			self._update_charger_powers()
+ 		elif service in self._batterysystem:
+ 			self._batterysystem.remove_battery(service)
+ 		elif service in self._inverters:
+ 			self._inverters.remove_inverter(service)
+ 		if len(self._solarsystem) == 0 and len(self._vecan_services) == 0 and \
+-			len(self._batterysystem) == 0 and self._timer is not None:
++			len(self._batterysystem) == 0 and len(self._chargersystem) == 0 and \
++			self._timer is not None:
+ 			GLib.source_remove(self._timer)
+ 			self._timer = None
+ 
+@@ -936,6 +987,11 @@
+ 			self._dbusservice['/Control/SolarChargeCurrent'] = current_written
+ 			self._dbusservice['/Control/EffectiveChargeVoltage'] = chargevoltage
+ 
++		def update_managedcharger_control_flags(voltage_written, current_written, budget):
++			self._dbusservice['/Control/ChargerChargeVoltage'] = voltage_written
++			self._dbusservice['/Control/ChargerChargeCurrent'] = current_written
++			self._dbusservice['/Dvcc/Chargers/Budget'] = budget
++
+ 		bol_support = self.has_dvcc
+ 
+ 		self._tickcount -= 1; self._tickcount %= ADJUST
+@@ -945,6 +1001,8 @@
+ 
+ 			voltage_written, current_written = self._legacy_update_solarchargers()
+ 			update_solarcharger_control_flags(voltage_written, current_written, None) # Not tracking for non-DVCC case
++			self._chargersystem.shutdown()
++			update_managedcharger_control_flags(0, 0, None)
+ 			self._dbusservice['/Control/BmsParameters'] = 0
+ 			self._dbusservice['/Control/MaxChargeCurrent'] = 0
+ 			self._dbusservice['/Control/Dvcc'] = 0
+@@ -962,7 +1020,10 @@
+ 
+ 		# Update subsystems
+ 		self._solarsystem.update_values()
+-		self._multi.update_values(self._solarsystem.capacity)
++		self._chargersystem.update_values()
++		self._dbusservice['/Dvcc/Chargers/Active'] = self._chargersystem.active_count
++		self._update_charger_powers()
++		self._multi.update_values(safeadd(self._solarsystem.capacity, self._chargersystem.capacity))
+ 
+ 		# Below are things we only do every ADJUST seconds
+ 		if self._tickcount > 0: return True
+@@ -978,6 +1039,8 @@
+ 				self._multi.has_vebus_bmsv2 and self._multi.has_mk3):
+ 			# BMS is lost
+ 			update_solarcharger_control_flags(0, 0, None)
++			self._chargersystem.shutdown()
++			update_managedcharger_control_flags(0, 0, None)
+ 			return True
+ 
+ 		# Get the user current limit, if set
+@@ -1047,9 +1110,35 @@
+ 			_max_charge_current, feedback_allowed, stop_on_mcc0)
+ 		update_solarcharger_control_flags(voltage_written, current_written, effective_charge_voltage)
+ 
+-		# The Multi gets the remainder after subtracting what the solar chargers made
++		# Managed (Huawei) chargers get what is left after the solar chargers.
++		# They are never maximised, and an unknown budget means zero.
++		charger_budget = _max_charge_current if self._settings['chargercompensatevebus'] else max_charge_current
++		if max_charge_current is not None and max_charge_current <= 0:
++			# The battery may not be charged at all: no compensation for the
++			# Multi either, the chargers stay off.
++			charger_budget = 0.0
++		# SOC ceiling, independent of the BMS limits (unknown SOC = no budget)
++		if not self._chargersystem.soc_allows(self._dbusservice['/Dc/Battery/Soc'],
++				self._settings['chargermaxsoc'], self._settings['chargerresumesoc']):
++			charger_budget = 0.0
++		self._dbusservice['/Dvcc/Chargers/SocInhibit'] = int(self._chargersystem.soc_inhibited)
++		if charger_budget is not None:
++			charger_budget -= self._solarsystem.smoothed_current
++			if self._settings['chargerpriority'] == 1:
++				# Multi before chargers: also subtract what the Multi is charging with
++				charger_budget -= max(0.0, self._multi.dc_current)
++			charger_budget = max(0.0, round(charger_budget, 1))
++		c_voltage_written, c_current_written = self._chargersystem.set_networked(
++			has_bms, effective_charge_voltage, charger_budget)
++		update_managedcharger_control_flags(c_voltage_written, c_current_written, charger_budget)
++
++		# The Multi gets the remainder after subtracting what the solar chargers
++		# (and, by default, the managed chargers) made
+ 		if max_charge_current is not None:
+-			max_charge_current = max(0.0, round(max_charge_current - self._solarsystem.smoothed_current))
++			max_charge_current -= self._solarsystem.smoothed_current
++			if self._settings['chargerpriority'] == 0:
++				max_charge_current -= self._chargersystem.smoothed_current
++			max_charge_current = max(0.0, round(max_charge_current))
+ 
+ 		# Write the remainder to the Multi.
+ 		# There are two ways to limit the charge current of a VE.Bus system. If we have a BMS,

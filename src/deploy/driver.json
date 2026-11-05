@@ -1,0 +1,23 @@
+{
+  "_comment": "Deployed to /data/huawei/driver.json. scales: current-scale policy per module serial (ratio1024 | x20 | x30 | conservative); ratio1024 (raw = A / nominal x 1024) CONFIRMED by clamp on E4308598A003 5..40 A and on 708A85B00972 at 1 A (2026-11-03). excluded: serials that are polled and published but never written to; 708A85B00972 (unit 1, R4875G5) caps itself at ~1.65 A whatever the limit (cause open) and must not take part in the allocation until that is solved. names: /CustomName defaults. display: board interface -> the serial of its unit and the address the board expects (USBCANFD DUAL channel 1 = can3 = board of charger 1; channel 0 = can2 = board of charger 2).",
+  "output_enable": "none",
+  "scales": {
+    "708A85B00972": "ratio1024",
+    "E4308598A003": "ratio1024"
+  },
+  "excluded": ["708A85B00972"],
+  "names": {
+    "708A85B00972": "Huawei 1",
+    "E4308598A003": "Huawei 2"
+  },
+  "display": {
+    "can3": {
+      "serial": "708A85B00972",
+      "board_addr": 1
+    },
+    "can2": {
+      "serial": "E4308598A003",
+      "board_addr": 1
+    }
+  }
+}

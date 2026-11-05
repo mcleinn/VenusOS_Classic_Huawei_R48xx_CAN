@@ -1,0 +1,75 @@
+#!/bin/sh
+# daemontools run script for the Huawei charger driver (supervised by svscan as
+# /service/huawei-charger, linked by /data/huawei/boot.sh from /data/rc.local).
+#
+# 2026-11-01: runs the real driver, telemetry-only. protocol.VERIFIED is False in the
+# code, so no 0x80 set frame can leave the process whatever the flags; the engine waits
+# 75 s (quiet start) after a unit's first frame before the first request, because status
+# polling keeps a unit on-line (measured B3.4). Refuses to start unless
+# /Settings/Canbus/can0/Profile is 0 (Disabled); brings can0 up at 125 kbit/s itself.
+#
+# 2026-11-03: CAN interface names are assigned by probe order. With the USB adapter of the
+# display boards attached during boot its driver (gs_usb) won the race, took can0/can1, the
+# BMS-Can port (slcand attaching ttyS3 as "can1") could not be created and Venus ran the
+# Pylontech BMS service on the USB adapter. Therefore:
+#   1. gs_usb is blacklisted (/etc/modprobe.d/huawei-usbcan.conf, guarded by boot.sh), so the
+#      adapter is never probed automatically;
+#   2. this script waits until the built-in ports are in place (can0 backed by the SoC
+#      controller 1c2bc00.can, can1 present and not a USB channel), only then loads gs_usb,
+#      whose two channels get the lowest free names, can2 and can3;
+#   3. the driver itself refuses to run on a can0 that is not 1c2bc00.can (--device) and
+#      refuses display ports that are not gs_usb channels.
+# If the built-in ports do not show up within WAIT_S the adapter stays unloaded and the
+# service retries after a minute (the boards then get no data, the Pylontech link is never
+# put at risk).
+#
+# Rollback to the stub: replace the exec line by
+#   exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u /data/huawei/src/driver/huawei_charger_stub.py
+# and `svc -t /service/huawei-charger`.
+# 2026-11-04: protocol verified by the load test. Control (the CanCommander, writing on-line
+# setpoints under DVCC and the per-unit /Mode switch) is requested only while the marker file
+# /data/huawei/control-enabled exists: `touch /data/huawei/control-enabled; svc -t /service/huawei-charger`
+# turns it on, `rm` + `svc -t` returns to telemetry-only. The /Mode switch of every unit is a
+# persisted setting (off until the operator turns it on, survives restarts afterwards).
+CONTROL=""
+if [ -e /data/huawei/control-enabled ]; then
+	CONTROL="--control"
+	echo "*** starting huawei-charger (driver, CONTROL: /data/huawei/control-enabled present) ***"
+else
+	echo "*** starting huawei-charger (driver, telemetry-only: /data/huawei/control-enabled absent) ***"
+fi
+exec 2>&1
+
+VECAN_DEV=1c2bc00.can
+WAIT_S=180
+
+dev() { basename "$(readlink "/sys/class/net/$1/device" 2>/dev/null)" 2>/dev/null; }
+drv() { basename "$(readlink "/sys/class/net/$1/device/driver" 2>/dev/null)" 2>/dev/null; }
+
+n=0
+while :; do
+	if [ "$(dev can0)" = "$VECAN_DEV" ] && [ -e /sys/class/net/can1 ] && [ "$(drv can1)" != "gs_usb" ]; then
+		break
+	fi
+	n=$((n + 1))
+	if [ "$n" -ge "$WAIT_S" ]; then
+		echo "built-in CAN ports not in place after ${n} s (can0 device '$(dev can0)', can1 driver '$(drv can1)'): gs_usb stays unloaded, retry in 60 s"
+		sleep 60
+		exit 1
+	fi
+	sleep 1
+done
+[ "$n" -gt 0 ] && echo "built-in CAN ports in place after ${n} s"
+
+if ! grep -q '^gs_usb ' /proc/modules; then
+	modprobe gs_usb || echo "modprobe gs_usb failed (USB adapter driver); display ports will be missing"
+fi
+n=0
+while [ "$n" -lt 10 ] && [ "$(drv can3)" != "gs_usb" ]; do
+	sleep 1
+	n=$((n + 1))
+done
+echo "CAN ports: can0=$(dev can0)/$(drv can0) can1=$(drv can1) can2=$(drv can2) can3=$(drv can3)"
+
+cd /data/huawei/src/driver || exit 1
+exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u -m huawei.main --interface can0 --device "$VECAN_DEV" --expected 2 --config /data/huawei/driver.json --log-level INFO $CONTROL

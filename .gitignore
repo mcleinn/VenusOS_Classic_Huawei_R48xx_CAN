@@ -1,0 +1,27 @@
+# Device backups pulled from the Cerbo (contain /etc and logs): never committed
+backup/
+
+# Raw logs and captures
+evidence/ramp-logs*/
+*.log
+*.candump
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local secrets, never committed
+*.token
+*.pem
+*.key
+.env
+
+# Local working material kept out of the repository (evidence, backups, project notes)
+_local/

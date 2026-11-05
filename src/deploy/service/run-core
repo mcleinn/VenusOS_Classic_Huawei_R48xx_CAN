@@ -1,0 +1,20 @@
+#!/bin/sh
+# daemontools run script for the Huawei charger driver, plain variant: rectifiers on the
+# Cerbo's VE.Can port (can0), no display boards, no USB CAN adapter. Install it as
+# /data/huawei/service/run. The shipped `run` is the test installation's script, which
+# additionally gates the gs_usb adapter of the rectifiers' control boards onto can2/can3.
+#
+# Control (writing on-line setpoints under DVCC and the per-unit /Mode switch) is requested
+# only while /data/huawei/control-enabled exists:
+#   touch /data/huawei/control-enabled; svc -t /service/huawei-charger   -> control
+#   rm /data/huawei/control-enabled; svc -t /service/huawei-charger      -> telemetry only
+CONTROL=""
+if [ -e /data/huawei/control-enabled ]; then
+	CONTROL="--control"
+	echo "*** starting huawei-charger (driver, CONTROL: /data/huawei/control-enabled present) ***"
+else
+	echo "*** starting huawei-charger (driver, telemetry-only: /data/huawei/control-enabled absent) ***"
+fi
+exec 2>&1
+cd /data/huawei/src/driver || exit 1
+exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u -m huawei.main --interface can0 --expected 2 --config /data/huawei/driver.json --log-level INFO $CONTROL

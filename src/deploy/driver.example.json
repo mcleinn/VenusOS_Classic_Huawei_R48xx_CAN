@@ -1,0 +1,13 @@
+{
+  "_comment": "Template for /data/huawei/driver.json: two rectifiers, no display boards. Replace the serials (12 hex digits, as printed by huawei-status.py or the e-label). scales: ratio1024 (raw = A / nominal x 1024) is confirmed on R4875G5 and R4875G1; use conservative for an unknown model until a load test confirms the scale. excluded: serials that are polled and shown but never written to. Add a display block only with the optional control-board repeater, see driver.json.",
+  "output_enable": "none",
+  "scales": {
+    "AAAAAAAAAAAA": "ratio1024",
+    "BBBBBBBBBBBB": "ratio1024"
+  },
+  "excluded": [],
+  "names": {
+    "AAAAAAAAAAAA": "Huawei 1",
+    "BBBBBBBBBBBB": "Huawei 2"
+  }
+}
