@@ -1,0 +1,11 @@
+# secrets: WLAN and broker credentials live only in include/secrets.h
+secrets.ini
+include/secrets.h
+secrets.ini
+# PlatformIO
+.pio/
+.vscode/
+# reference checkouts (Victron gui-v2 etc.) and downloads
+ref/
+_local/
+*.bin
