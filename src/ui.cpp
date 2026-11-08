@@ -190,6 +190,27 @@ static void fmt_power(char *buf, size_t n, float p, bool arrows = true)
     else        snprintf(buf, n, "%d W", (int)lroundf(p));
 }
 
+// Subtle breathing of a label (text opacity 100 % <-> 65 %) while the charger is charging.
+struct Breath { lv_anim_t anim; bool on = false; };
+static void breath_cb(void *o, int32_t v) { lv_obj_set_style_text_opa((lv_obj_t *)o, v, 0); }
+static void set_breath(Breath &b, lv_obj_t *label, bool on)
+{
+    if (on == b.on) return;
+    b.on = on;
+    lv_anim_del(label, breath_cb);
+    if (!on) { lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0); return; }
+    lv_anim_init(&b.anim);
+    lv_anim_set_var(&b.anim, label);
+    lv_anim_set_exec_cb(&b.anim, breath_cb);
+    lv_anim_set_values(&b.anim, LV_OPA_COVER, LV_OPA_60 + 10);
+    lv_anim_set_time(&b.anim, 1200);
+    lv_anim_set_playback_time(&b.anim, 1200);
+    lv_anim_set_repeat_count(&b.anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&b.anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&b.anim);
+}
+static Breath s_breath_main, s_breath_tile;
+
 // --- animated flow: a dot travelling along a straight line -------------------------------
 struct Flow {
     lv_obj_t *dot = nullptr;
@@ -457,6 +478,7 @@ static void update_page_charger(const Model &m, bool fresh)
     if (cur.has()) { snprintf(buf, sizeof buf, "%.1f A", cur.v); lv_label_set_text(s_chg_current, buf); }
     else lv_label_set_text(s_chg_current, "-- A");
     lv_obj_set_style_text_color(s_chg_current, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
+    set_breath(s_breath_main, s_chg_current, running);
     if (vol.has()) { snprintf(buf, sizeof buf, "%.1f V", vol.v); lv_label_set_text(s_chg_volt, buf); }
     if (pwr.has()) { snprintf(buf, sizeof buf, "%d W", (int)lroundf(pwr.v)); lv_label_set_text(s_chg_watt, buf); }
     if (tmp.has()) {
@@ -890,6 +912,7 @@ static void saver_update(const Model &m, bool fresh)
     const bool running = cur.has() && cur.v > 0.5f && chg_fresh;
     if (cur.has()) { snprintf(buf, sizeof buf, "%.1f A", cur.v); lv_label_set_text(s_tile_cur, buf); }
     lv_obj_set_style_text_color(s_tile_cur, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
+    set_breath(s_breath_tile, s_tile_cur, running);
     {
         const RingData r = ring_data(m, cur, chg_fresh);
         draw_ring(s_tile_cur1, s_tile_cur2, r);
