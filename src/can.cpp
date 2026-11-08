@@ -73,6 +73,18 @@ static void decode(const twai_message_t &f)
     }
 }
 
+// Feed a frame as if received from the bus (serial replay of recorded captures, see
+// tools/can_replay.py). Marks the link alive like a real frame.
+void can_inject(uint32_t id, const uint8_t *data, uint8_t len)
+{
+    twai_message_t f = {};
+    f.identifier = id;
+    f.extd = 1;
+    f.data_length_code = len > 8 ? 8 : len;
+    memcpy(f.data, data, f.data_length_code);
+    decode(f);
+}
+
 void can_begin()
 {
     twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)PIN_CAN_TX, (gpio_num_t)PIN_CAN_RX, TWAI_MODE_LISTEN_ONLY);

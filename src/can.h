@@ -5,3 +5,7 @@
 // It decodes both directions: the control board's set commands and the charger's status/acks.
 void can_begin();
 void can_loop();
+
+#include <stdint.h>
+// Test hook: decode a frame as if it came from the bus.
+void can_inject(uint32_t id, const uint8_t *data, uint8_t len);

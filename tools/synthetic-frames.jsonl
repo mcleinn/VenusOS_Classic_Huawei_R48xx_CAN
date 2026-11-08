@@ -1,0 +1,11 @@
+{"dir": "rx", "kind": "can", "id": "0x1081407F", "hex": "018100000000A000", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1081407F", "hex": "017500000000C8CD", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1081407F", "hex": "01730000001F4000", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1081407F", "hex": "01780000000398CD", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1081407F", "hex": "01881D4C00000000", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1081407F", "hex": "0183000008000000", "ext": true}
+{"dir": "tx", "kind": "can", "id": "0x108080FE", "hex": "01030000000002AB", "ext": true}
+{"dir": "tx", "kind": "can", "id": "0x108080FE", "hex": "010000000000D199", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1081807E", "hex": "01030000000002AB", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1001117E", "hex": "0003000000010222", "ext": true}
+{"dir": "rx", "kind": "can", "id": "0x1081407F", "hex": "018300000020000000", "ext": true}

@@ -143,9 +143,14 @@ Two mechanisms are built in; use the HTTP one on this PC:
 
 ## Open items
 
-- CAN: code is in place (listen-only, TJA1051T/3 on GPIO17/18); unverified until the transceiver is
-  wired to the charger bus. Then check: badge green, CAN page fills, set ratio x rated current
-  matches the Venus driver's SentCurrent, 0x83 flags plausible.
+- CAN: code is in place (listen-only, TJA1051T/3 on GPIO17/18). The **decoder is verified** on the
+  device by serial replay of real bus recordings against the Venus driver's reference decoder
+  (`python tools/can_replay.py COM11 <capture.jsonl>`; 2026-11-08: 3341 + 11400 real frames from the
+  October bench captures and `tools/synthetic-frames.jsonl` with known raw values, all fields match:
+  out A/V/W, AC V/A/W/Hz, temperatures, limit and load ratio, rated current, set V and ratio, acks,
+  output-on / AC-present bits). Still unverified until the transceiver is wired: the TWAI driver on
+  the real bus (bit timing 125 kbit/s, listen-only acks), badge turning green, two-node bus load.
+- The firmware accepts `can <id hex> <data hex>` and `dump` on the USB serial port for such tests.
 - Touch works for swipes and taps; FT3168 NACK once per ~14 s while idle is silenced.
 - `docs/board-notes.md` still lists GPIO46 as IMU INT1 per the schematic; on the shipped hardware
   INT1 is presumably GPIO9 (unverified, the IMU is not used).
