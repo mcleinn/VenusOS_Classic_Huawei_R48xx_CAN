@@ -157,7 +157,8 @@ Two mechanisms are built in; use the HTTP one on this PC:
 
 ## CAN side, requirements (stated 2026-11-08, not built yet)
 
-- Transceiver TJA1051T/3 on the ESP32-S3 TWAI controller (pins to be chosen on the P1/P2 headers).
+- Transceiver TJA1051T/3 on the ESP32-S3 TWAI controller, header P1: TXD <- GPIO17, RXD -> GPIO18,
+  S (silent, high = transmitter off) <- GPIO16 driven high at boot; VCC 5 V, VIO 3V3, GND.
 - The display hangs on the **same CAN bus the charger module's control board uses**, as a second
   node that only listens: it is a CAN slave, never a master, it does not send commands or acks.
 - It decodes both directions: the control board's commands/setpoints to the charger and the

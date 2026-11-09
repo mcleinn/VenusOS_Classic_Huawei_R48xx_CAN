@@ -48,3 +48,6 @@
 // Passive listener on the charger's bus (TWAI listen-only), see src/can.cpp.
 #define PIN_CAN_TX       17
 #define PIN_CAN_RX       18
+// TJA1051T/3 pin S: high = silent (transmitter off, receiver on). Driven high at boot and kept
+// there: the display is a listener only, and this makes it so in hardware as well.
+#define PIN_CAN_SILENT   16

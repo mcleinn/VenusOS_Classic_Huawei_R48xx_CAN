@@ -92,13 +92,15 @@ void can_begin()
     g.alerts_enabled = TWAI_ALERT_BUS_OFF | TWAI_ALERT_ERR_PASS | TWAI_ALERT_BUS_RECOVERED;
     twai_timing_config_t t = TWAI_TIMING_CONFIG_125KBITS();
     twai_filter_config_t fcfg = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+    pinMode(PIN_CAN_SILENT, OUTPUT);
+    digitalWrite(PIN_CAN_SILENT, HIGH);   // TJA1051T/3 silent mode: never drive the charger bus
     pinMode(PIN_CAN_RX, INPUT_PULLUP);    // idle = recessive while no transceiver is attached
     if (twai_driver_install(&g, &t, &fcfg) != ESP_OK || twai_start() != ESP_OK) {
         Serial.println("can: driver start failed");
         return;
     }
     s_started = true;
-    Serial.printf("can: listen-only on TX %d / RX %d, 125 kbit/s\n", PIN_CAN_TX, PIN_CAN_RX);
+    Serial.printf("can: listen-only on TX %d / RX %d, transceiver silent via GPIO%d, 125 kbit/s\n", PIN_CAN_TX, PIN_CAN_RX, PIN_CAN_SILENT);
 }
 
 void can_loop()
