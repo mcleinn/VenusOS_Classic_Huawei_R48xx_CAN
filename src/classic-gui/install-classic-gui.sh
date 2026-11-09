@@ -11,7 +11,7 @@
 #
 # Base ("before") versions: HubData.qml = pristine v2.92; OverviewHub.qml = the user's 2023
 # modification (PV text "x+yW"). The pristine OverviewHub.qml is recognised but NOT patched:
-# the user's six modifications (C:\Dev-Free\CerboGX\Venus2.9.2-patch) must be re-applied first.
+# the user's six modifications (C:\Dev-Free\CerboGXackground-patch) must be re-applied first.
 # Files are replaced whole, with pinned SHA-256 hashes. A GUI restart blanks the display for a
 # few seconds and has no effect on control.
 set -u
@@ -26,7 +26,7 @@ FILES="HubData.qml OverviewHub.qml"
 
 BEFORE_HubData=e8858b7654a544464e578d21b5c7e6bf342716728fd1ca9e10ec40b5b54be933
 BEFORE_OverviewHub=9f553549bde9a2fa4bc33fe6429368e77f9bc931d30d436f43c6f5897177f723
-PRISTINE_OverviewHub=UNKNOWN   # set from Venus2.9.2-patch/pristine-v2.92 if ever needed
+PRISTINE_OverviewHub=UNKNOWN   # set from C:/Dev-Free/CerboGX/background-patch/pristine-v2.92 if ever needed
 INSTALLED_HubData=828b6e9bf6210cc2182f75da6482b9b00adea7ba16edd91a267c9829ed798d04
 INSTALLED_OverviewHub=26024cb7d75d0dfd7085de296940ca5c2cb2984b6eea87f47467eb144405691f
 # earlier installed builds (same evening); upgraded in place
@@ -69,7 +69,7 @@ do_install() {
 		case "$(state_of "$f")" in
 			installed) ;;
 			before|installed-old) all_installed=0 ;;
-			pristine) die "$f is the pristine v2.92 file; re-apply the user's GUI modifications first (Venus2.9.2-patch), then run install again" ;;
+			pristine) die "$f is the pristine v2.92 file; re-apply the user's GUI modifications first (C:/Dev-Free/CerboGX/background-patch), then run install again" ;;
 			unknown) die "$f has hash $(sha "$QML/$f"), neither the expected base nor a known build; nothing touched" ;;
 		esac
 	done

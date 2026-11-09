@@ -31,7 +31,7 @@ ever enabled (`/Dc/System/Power` valid), the DC Power box wins the slot and the 
 
 Device backups: `/data/huawei/backup/gui/HubData.qml.2026-10-22.orig`, `OverviewHub.qml.2026-10-22.orig`.
 This folder is the only copy of the tile change; the user's own six GUI modifications stay in
-`C:\Dev-Free\CerboGX\Venus2.9.2-patch\` (which only carries a pointer here). `diffs/huawei-tile-all.diff`
+`C:\Dev-Free\CerboGXackground-patch\` (renamed from `Venus2.9.2-patch` 2026-11-06; which only carries a pointer here). This folder is also reachable as the junction `C:\Dev-Free\CerboGXc-tile-patch`. `diffs/huawei-tile-all.diff`
 is both diffs in one. After a firmware update re-apply the six modifications first, then these.
 
 ## Installer (`install-classic-gui.sh`, deployed to `/data/huawei/classic-gui/`)
@@ -47,7 +47,7 @@ verified before anything is written, nothing touched when a file is unknown.
 States: `installed`, `before` (pre-tile base: pristine HubData, the user's 2023 OverviewHub),
 `installed-old` (an earlier build of the same evening, upgraded in place), `pristine` (OverviewHub as
 shipped by Victron: refused, the user's six modifications must be re-applied first from
-`C:\Dev-Free\CerboGX\Venus2.9.2-patch`), `unknown` (refused). The guard runs from
+`C:\Dev-Free\CerboGXackground-patch`), `unknown` (refused). The guard runs from
 `/data/huawei/boot.sh` at every boot. Manifest: `/data/huawei/classic-gui.manifest`.
 
 Deploy a new build from the PC: copy `install-classic-gui.sh` and the two files in `modified/` to
