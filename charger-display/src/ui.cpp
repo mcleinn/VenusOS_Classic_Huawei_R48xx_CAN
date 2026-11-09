@@ -190,7 +190,7 @@ static void fmt_power(char *buf, size_t n, float p, bool arrows = true)
     else        snprintf(buf, n, "%d W", (int)lroundf(p));
 }
 
-// Subtle breathing of a label (text opacity 100 % <-> 65 %) while the charger is charging.
+// Subtle breathing of a label (text opacity 100 % <-> 86 %) while the charger is charging.
 struct Breath { lv_anim_t anim; bool on = false; };
 static void breath_cb(void *o, int32_t v) { lv_obj_set_style_text_opa((lv_obj_t *)o, v, 0); }
 static void set_breath(Breath &b, lv_obj_t *label, bool on)
@@ -202,7 +202,7 @@ static void set_breath(Breath &b, lv_obj_t *label, bool on)
     lv_anim_init(&b.anim);
     lv_anim_set_var(&b.anim, label);
     lv_anim_set_exec_cb(&b.anim, breath_cb);
-    lv_anim_set_values(&b.anim, LV_OPA_COVER, LV_OPA_60 + 10);
+    lv_anim_set_values(&b.anim, LV_OPA_COVER, LV_OPA_80 + 15);   // 100 % -> 86 %, barely visible
     lv_anim_set_time(&b.anim, 1200);
     lv_anim_set_playback_time(&b.anim, 1200);
     lv_anim_set_repeat_count(&b.anim, LV_ANIM_REPEAT_INFINITE);
@@ -736,7 +736,7 @@ static void build_page_status(lv_obj_t *pg)
     s_s_inst = make_kv(pg, C3, R0 + 1 * DR, "CHARGER SERVICE");
     s_s_up   = make_kv(pg, C1, R0 + 2 * DR, "UPTIME");
     s_s_heap = make_kv(pg, C2, R0 + 2 * DR, "FREE MEMORY");
-    s_s_fw   = make_kv(pg, C3, R0 + 2 * DR, "DISPLAY FIRMWARE");
+    s_s_fw   = make_kv(pg, C3, R0 + 2 * DR, "DISPLAY FIRMWARE (BUILD)");
 }
 
 static void update_page_status(const Model &m, bool)
@@ -764,7 +764,7 @@ static void update_page_status(const Model &m, bool)
     lv_label_set_text(s_s_up.val, buf);
     snprintf(buf, sizeof buf, "%u KB", ESP.getFreeHeap() / 1024);
     lv_label_set_text(s_s_heap.val, buf);
-    lv_label_set_text(s_s_fw.val, UI_FW_VERSION);
+    lv_label_set_text(s_s_fw.val, UI_FW_VERSION " " __DATE__ " " __TIME__);
 }
 
 // --- page 5: CAN bus (passive listener) ----------------------------------------------------
