@@ -11,7 +11,7 @@
 #
 # Base ("before") versions: HubData.qml = pristine v2.92; OverviewHub.qml = the user's 2023
 # modification (PV text "x+yW"). The pristine OverviewHub.qml is recognised but NOT patched:
-# the user's six modifications (C:\Dev-Free\CerboGXackground-patch) must be re-applied first.
+# the user's six modifications (C:\Dev-Free\CerboGX\background-patch) must be re-applied first.
 # Files are replaced whole, with pinned SHA-256 hashes. A GUI restart blanks the display for a
 # few seconds and has no effect on control.
 set -u
