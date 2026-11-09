@@ -408,7 +408,7 @@ static void build_page_charger(lv_obj_t *pg)
 
     flow_init(s_flow0, pg, COL_X - 4, ARC_Y + ARC_D / 2 - 4, ARC_X + ARC_D - 8, ARC_Y + ARC_D / 2 - 4, C_GREEN);
 
-    lv_obj_t *card = make_card(pg, COL_X, 8, COL_W, 158);
+    lv_obj_t *card = make_card(pg, COL_X, 8, COL_W, 146);
     lv_obj_t *t = make_label(card, &lv_font_montserrat_12, C_DIM, "CHARGER");
     lv_obj_set_pos(t, 0, 0);
     s_chg_state = make_label(card, &lv_font_montserrat_12, C_DIM, "");
@@ -421,12 +421,10 @@ static void build_page_charger(lv_obj_t *pg)
     lv_obj_set_pos(s_chg_volt, 0, 106);
     s_chg_temp = make_label(card, &lv_font_montserrat_14, C_DIM, "");
     lv_obj_align(s_chg_temp, LV_ALIGN_TOP_RIGHT, 0, 106);
-    s_chg_limit = make_label(card, &lv_font_montserrat_12, C_DIM, "");
-    lv_obj_set_pos(s_chg_limit, 0, 124);
-    lv_label_set_long_mode(s_chg_limit, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_chg_limit, COL_W - 20);
+    s_chg_limit = make_label(card, &lv_font_montserrat_14, C_DIM, "");
+    lv_obj_align(s_chg_limit, LV_ALIGN_TOP_MID, 0, 106);
 
-    card = make_card(pg, COL_X, 172, COL_W, 70);
+    card = make_card(pg, COL_X, 160, COL_W, 82);
     t = make_label(card, &lv_font_montserrat_12, C_DIM, "LOADS");
     lv_obj_set_pos(t, 0, 0);
     s_sys_loads = make_label(card, &lv_font_montserrat_20, C_TEXT, "-- W");
@@ -491,9 +489,9 @@ static void update_page_charger(const Model &m, bool fresh)
         lv_obj_set_style_text_color(s_chg_temp, tmp.v > 70 ? C_RED : tmp.v > 55 ? C_ORANGE : C_DIM, 0);
     }
     if (m.link_limit.has()) {
-        if (m.limiting_reason[0]) snprintf(buf, sizeof buf, "limit %d A · %s", (int)lroundf(m.link_limit.v), m.limiting_reason);
-        else                      snprintf(buf, sizeof buf, "limit %d A", (int)lroundf(m.link_limit.v));
+        snprintf(buf, sizeof buf, "lim %d A", (int)lroundf(m.link_limit.v));
         lv_label_set_text(s_chg_limit, buf);
+        lv_obj_align(s_chg_limit, LV_ALIGN_TOP_MID, 0, 106);
     }
     flow_set(s_flow0, running ? 1 : 0, 900);
     {
@@ -822,7 +820,7 @@ static void update_page_can(const Model &m, bool)
 // in the normal colours, no box, gliding to a new random place every few seconds. Any touch, or
 // the BOOT button, returns to the main screen. Starts after SAVER_AFTER_MS without input.
 static constexpr uint32_t SAVER_AFTER_MS = 120000;
-static constexpr int TILE_W = 330, TILE_H = 160;
+static constexpr int TILE_W = 380, TILE_H = 160;
 static constexpr uint32_t TILE_HOP_MS = 8000;
 
 static lv_obj_t *s_saver_scr, *s_tile;
