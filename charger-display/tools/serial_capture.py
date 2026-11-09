@@ -19,7 +19,18 @@ print(f"--- serial {port_name}, {seconds:.0f} s ---", flush=True)
 t_end = time.time() + seconds
 buf = b""
 while time.time() < t_end:
-    buf += port.read(4096)
+    try:
+        buf += port.read(4096)
+    except serial.SerialException:          # board reset -> USB re-enumerated; reopen and go on
+        print("[port re-enumerated]", flush=True)
+        try: port.close()
+        except Exception: pass
+        port = None
+        while port is None and time.time() < t_end:
+            try: port = serial.Serial(port_name, 115200, timeout=0.5)
+            except Exception: time.sleep(0.5)
+        if port is None: break
+        continue
     while b"\n" in buf:
         line, buf = buf.split(b"\n", 1)
         s = line.decode("utf-8", "replace").rstrip()

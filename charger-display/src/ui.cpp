@@ -192,7 +192,9 @@ static void fmt_power(char *buf, size_t n, float p, bool arrows = true)
 
 // One pulse per screen while the charger is charging: the current ring and the amperes/watts
 // texts breathe in sync (same period and phase). Ring dips to 40 %, text only to 86 %.
-struct Pulse { lv_anim_t anim; bool on = false; lv_obj_t *arcs[2] = {nullptr, nullptr}; lv_obj_t *labels[2] = {nullptr, nullptr}; };
+// NB: lv_anim_t must not be the first member: LVGL treats var == &anim as a self-reference and
+// repoints it to its internal copy, which turned var into garbage (crash of 2026-11-09).
+struct Pulse { bool on = false; lv_obj_t *arcs[2] = {nullptr, nullptr}; lv_obj_t *labels[2] = {nullptr, nullptr}; lv_anim_t anim; };
 static void pulse_exec(void *var, int32_t v)      // v: 0 = fully lit ... 255 = deepest dip
 {
     Pulse *p = (Pulse *)var;
@@ -861,9 +863,9 @@ static void saver_build()
     s_tile_name = make_label(s_tile, &lv_font_montserrat_16, C_DIM, model.charger_name);
     lv_obj_set_pos(s_tile_name, 172, 6);
     s_tile_cur = make_label(s_tile, &lv_font_montserrat_48, C_TEXT, "-- A");
-    lv_obj_set_pos(s_tile_cur, 170, 44);
+    lv_obj_set_pos(s_tile_cur, 170, 40);
     s_tile_watt = make_label(s_tile, &lv_font_montserrat_48, C_TEXT, "-- W");   // same size as the amperes
-    lv_obj_set_pos(s_tile_watt, 170, 98);
+    lv_obj_set_pos(s_tile_watt, 170, 86);
     s_tile_pwr = make_label(s_tile, &lv_font_montserrat_20, C_DIM, "");   // battery total: no longer shown
     lv_obj_add_flag(s_tile_pwr, LV_OBJ_FLAG_HIDDEN);
 
