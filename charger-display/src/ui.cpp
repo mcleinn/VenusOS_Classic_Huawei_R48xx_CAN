@@ -209,7 +209,7 @@ static void set_breath(Breath &b, lv_obj_t *label, bool on)
     lv_anim_set_path_cb(&b.anim, lv_anim_path_ease_in_out);
     lv_anim_start(&b.anim);
 }
-static Breath s_breath_main, s_breath_tile;
+static Breath s_breath_main, s_breath_tile, s_breath_main_w, s_breath_tile_w;
 
 // --- animated flow: a dot travelling along a straight line -------------------------------
 struct Flow {
@@ -408,25 +408,25 @@ static void build_page_charger(lv_obj_t *pg)
 
     flow_init(s_flow0, pg, COL_X - 4, ARC_Y + ARC_D / 2 - 4, ARC_X + ARC_D - 8, ARC_Y + ARC_D / 2 - 4, C_GREEN);
 
-    lv_obj_t *card = make_card(pg, COL_X, 8, COL_W, 134);
+    lv_obj_t *card = make_card(pg, COL_X, 8, COL_W, 158);
     lv_obj_t *t = make_label(card, &lv_font_montserrat_12, C_DIM, "CHARGER");
     lv_obj_set_pos(t, 0, 0);
     s_chg_state = make_label(card, &lv_font_montserrat_12, C_DIM, "");
     lv_obj_align(s_chg_state, LV_ALIGN_TOP_RIGHT, 0, 0);
     s_chg_current = make_label(card, &lv_font_montserrat_40, C_TEXT, "-- A");
-    lv_obj_set_pos(s_chg_current, 0, 16);
+    lv_obj_set_pos(s_chg_current, 0, 14);
+    s_chg_watt = make_label(card, &lv_font_montserrat_40, C_TEXT, "-- W");      // same style, below the amperes
+    lv_obj_set_pos(s_chg_watt, 0, 58);
     s_chg_volt = make_label(card, &lv_font_montserrat_14, C_DIM, "");
-    lv_obj_set_pos(s_chg_volt, 0, 66);
-    s_chg_watt = make_label(card, &lv_font_montserrat_14, C_DIM, "");
-    lv_obj_set_pos(s_chg_watt, 72, 66);
+    lv_obj_set_pos(s_chg_volt, 0, 106);
     s_chg_temp = make_label(card, &lv_font_montserrat_14, C_DIM, "");
-    lv_obj_align(s_chg_temp, LV_ALIGN_TOP_RIGHT, 0, 66);
+    lv_obj_align(s_chg_temp, LV_ALIGN_TOP_RIGHT, 0, 106);
     s_chg_limit = make_label(card, &lv_font_montserrat_12, C_DIM, "");
-    lv_obj_set_pos(s_chg_limit, 0, 90);
+    lv_obj_set_pos(s_chg_limit, 0, 124);
     lv_label_set_long_mode(s_chg_limit, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_chg_limit, COL_W - 20);
 
-    card = make_card(pg, COL_X, 150, COL_W, 92);
+    card = make_card(pg, COL_X, 172, COL_W, 70);
     t = make_label(card, &lv_font_montserrat_12, C_DIM, "LOADS");
     lv_obj_set_pos(t, 0, 0);
     s_sys_loads = make_label(card, &lv_font_montserrat_20, C_TEXT, "-- W");
@@ -436,7 +436,7 @@ static void build_page_charger(lv_obj_t *pg)
     s_sys_source = make_label(card, &lv_font_montserrat_20, C_TEXT, "--");
     lv_obj_set_pos(s_sys_source, 100, 16);
     s_sys_state = make_label(card, &lv_font_montserrat_12, C_DIM, "");
-    lv_obj_set_pos(s_sys_state, 0, 50);
+    lv_obj_align(s_sys_state, LV_ALIGN_TOP_RIGHT, 0, 0);
 }
 
 static void update_page_charger(const Model &m, bool fresh)
@@ -481,10 +481,13 @@ static void update_page_charger(const Model &m, bool fresh)
     set_breath(s_breath_main, s_chg_current, running);
     if (vol.has()) { snprintf(buf, sizeof buf, "%.1f V", vol.v); lv_label_set_text(s_chg_volt, buf); }
     if (pwr.has()) { snprintf(buf, sizeof buf, "%d W", (int)lroundf(pwr.v)); lv_label_set_text(s_chg_watt, buf); }
+    else lv_label_set_text(s_chg_watt, "-- W");
+    lv_obj_set_style_text_color(s_chg_watt, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
+    set_breath(s_breath_main_w, s_chg_watt, running);
     if (tmp.has()) {
         snprintf(buf, sizeof buf, "%d °C", (int)lroundf(tmp.v));
         lv_label_set_text(s_chg_temp, buf);
-        lv_obj_align(s_chg_temp, LV_ALIGN_TOP_RIGHT, 0, 66);
+        lv_obj_align(s_chg_temp, LV_ALIGN_TOP_RIGHT, 0, 106);
         lv_obj_set_style_text_color(s_chg_temp, tmp.v > 70 ? C_RED : tmp.v > 55 ? C_ORANGE : C_DIM, 0);
     }
     if (m.link_limit.has()) {
@@ -507,7 +510,7 @@ static void update_page_charger(const Model &m, bool fresh)
         lv_label_set_text(s_sys_source, buf);
         lv_obj_set_style_text_color(s_sys_source, val_col, 0);
     }
-    if (m.system_state.has()) lv_label_set_text(s_sys_state, system_state_text((int)m.system_state.v));
+    if (m.system_state.has()) { lv_label_set_text(s_sys_state, system_state_text((int)m.system_state.v)); lv_obj_align(s_sys_state, LV_ALIGN_TOP_RIGHT, 0, 0); }
 }
 
 // --- page 1: system overview (gui-v2 overview idiom: boxes and flows) ----------------------
@@ -742,9 +745,11 @@ static void build_page_status(lv_obj_t *pg)
 static void update_page_status(const Model &m, bool)
 {
     char buf[48];
-    if (m.wifi == LinkState::Up) snprintf(buf, sizeof buf, "%d dBm · %lu drops", m.wifi_rssi, (unsigned long)g_wifi_drops);
-    else snprintf(buf, sizeof buf, "%s", m.wifi == LinkState::Connecting ? "connecting" : "down");
+    if (m.wifi == LinkState::Up) snprintf(buf, sizeof buf, "%d dBm · %s", m.wifi_rssi, m.wifi_node);
+    else snprintf(buf, sizeof buf, "%s · reason %d", m.wifi == LinkState::Connecting ? "connecting" : "down", g_wifi_last_reason);
     lv_label_set_text(s_s_wifi.val, buf);
+    snprintf(buf, sizeof buf, "%lu drops · %lu roams · last %d", (unsigned long)g_wifi_drops, (unsigned long)g_wifi_roams, g_wifi_last_reason);
+    lv_label_set_text(s_s_wifi.key, buf);
     lv_label_set_text(s_s_ip.val, m.wifi == LinkState::Up ? m.ip : "--");
     if (m.can == LinkState::Up) snprintf(buf, sizeof buf, "%lu frames", (unsigned long)m.can_frames);
     else snprintf(buf, sizeof buf, "no transceiver");
@@ -821,7 +826,7 @@ static constexpr int TILE_W = 330, TILE_H = 160;
 static constexpr uint32_t TILE_HOP_MS = 8000;
 
 static lv_obj_t *s_saver_scr, *s_tile;
-static lv_obj_t *s_tile_arc, *s_tile_cur1, *s_tile_cur2, *s_tile_soc, *s_tile_name, *s_tile_cur, *s_tile_pwr;
+static lv_obj_t *s_tile_arc, *s_tile_cur1, *s_tile_cur2, *s_tile_soc, *s_tile_name, *s_tile_cur, *s_tile_watt, *s_tile_pwr;
 static lv_anim_t s_tile_pulse;
 static bool s_tile_pulsing = false;
 static bool s_saver_on = false;
@@ -880,9 +885,11 @@ static void saver_build()
     s_tile_name = make_label(s_tile, &lv_font_montserrat_16, C_DIM, model.charger_name);
     lv_obj_set_pos(s_tile_name, 172, 10);
     s_tile_cur = make_label(s_tile, &lv_font_montserrat_48, C_TEXT, "-- A");
-    lv_obj_set_pos(s_tile_cur, 170, 36);
-    s_tile_pwr = make_label(s_tile, &lv_font_montserrat_20, C_DIM, "");
-    lv_obj_set_pos(s_tile_pwr, 172, 104);
+    lv_obj_set_pos(s_tile_cur, 170, 30);
+    s_tile_watt = make_label(s_tile, &lv_font_montserrat_40, C_TEXT, "-- W");
+    lv_obj_set_pos(s_tile_watt, 172, 92);
+    s_tile_pwr = make_label(s_tile, &lv_font_montserrat_20, C_DIM, "");   // battery total: no longer shown
+    lv_obj_add_flag(s_tile_pwr, LV_OBJ_FLAG_HIDDEN);
 
     lv_timer_create(tile_hop, TILE_HOP_MS, nullptr);
 }
@@ -913,6 +920,12 @@ static void saver_update(const Model &m, bool fresh)
     if (cur.has()) { snprintf(buf, sizeof buf, "%.1f A", cur.v); lv_label_set_text(s_tile_cur, buf); }
     lv_obj_set_style_text_color(s_tile_cur, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
     set_breath(s_breath_tile, s_tile_cur, running);
+    {
+        const Sample &pw = live_power(m);
+        if (pw.has()) { snprintf(buf, sizeof buf, "%d W", (int)lroundf(pw.v)); lv_label_set_text(s_tile_watt, buf); }
+        lv_obj_set_style_text_color(s_tile_watt, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
+        set_breath(s_breath_tile_w, s_tile_watt, running);
+    }
     {
         const RingData r = ring_data(m, cur, chg_fresh);
         draw_ring(s_tile_cur1, s_tile_cur2, r);

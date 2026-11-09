@@ -252,6 +252,10 @@ static void on_wifi_event(WiFiEvent_t ev, WiFiEventInfo_t info)
     }
 }
 
+// First join: let the radio pick. Every retry after a failed join: blocking scan (about 1.5 s)
+// for the strongest node of our SSID and connect to it by BSSID. In a mesh the radio's own pick
+// can be a node that is out of reach from where the display hangs.
+static uint32_t g_wifi_joins = 0;
 static void wifi_start()
 {
     static bool hooked = false;
@@ -259,7 +263,27 @@ static void wifi_start()
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
     WiFi.setAutoReconnect(true);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    g_wifi_joins++;
+    bool pinned = false;
+    if (g_wifi_joins > 1) {
+        int16_t n = WiFi.scanNetworks(false, false, false, 120, 0, WIFI_SSID);
+        int best = -1, best_rssi = -127;
+        for (int i = 0; i < n; i++) if (WiFi.RSSI(i) > best_rssi) { best = i; best_rssi = WiFi.RSSI(i); }
+        if (best >= 0) {
+            uint8_t bssid[6];
+            memcpy(bssid, WiFi.BSSID(best), 6);
+            const int ch = WiFi.channel(best);
+            Serial.printf("wifi: retry %lu: %d node(s) of our SSID, joining %s ch %d %d dBm\n",
+                          (unsigned long)g_wifi_joins, n, WiFi.BSSIDstr(best).c_str(), ch, best_rssi);
+            WiFi.scanDelete();
+            WiFi.begin(WIFI_SSID, WIFI_PASSWORD, ch, bssid);
+            pinned = true;
+        } else {
+            Serial.printf("wifi: retry %lu: our SSID not seen in the scan\n", (unsigned long)g_wifi_joins);
+            WiFi.scanDelete();
+        }
+    }
+    if (!pinned) WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     s_wifi_started = millis();
     model.wifi = LinkState::Connecting;
     Serial.println("wifi: connecting");
@@ -486,6 +510,7 @@ void net_loop()
         if (model.wifi != LinkState::Up) {
             model.wifi = LinkState::Up;
             strncpy(model.ip, WiFi.localIP().toString().c_str(), sizeof model.ip - 1);
+            snprintf(model.wifi_node, sizeof model.wifi_node, "%s ch%d", WiFi.BSSIDstr().c_str() + 12, WiFi.channel());
             Serial.printf("wifi: up, ip %s, rssi %d\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
             s_mqtt_next_try = 0;
         }
