@@ -424,7 +424,7 @@ static void build_page_charger(lv_obj_t *pg)
     s_chg_limit = make_label(card, &lv_font_montserrat_14, C_DIM, "");
     lv_obj_align(s_chg_limit, LV_ALIGN_TOP_MID, 0, 106);
 
-    card = make_card(pg, COL_X, 160, COL_W, 82);
+    card = make_card(pg, COL_X, 160, COL_W, 66);   // ends 28 px above the page dots
     t = make_label(card, &lv_font_montserrat_12, C_DIM, "LOADS");
     lv_obj_set_pos(t, 0, 0);
     s_sys_loads = make_label(card, &lv_font_montserrat_20, C_TEXT, "-- W");
