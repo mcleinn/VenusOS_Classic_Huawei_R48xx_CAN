@@ -493,7 +493,6 @@ static void update_page_charger(const Model &m, bool fresh)
         lv_label_set_text(s_chg_limit, buf);
         lv_obj_align(s_chg_limit, LV_ALIGN_TOP_MID, 0, 106);
     }
-    flow_set(s_flow0, running ? 1 : 0, 900);
     {
         const RingData r = ring_data(m, cur, chg_fresh);
         set_current_ring(r.c1, r.c2, r.scale, r.charging);
@@ -881,11 +880,11 @@ static void saver_build()
     s_tile_soc = make_label(s_tile, &lv_font_montserrat_32, C_TEXT, "--");
     lv_obj_align_to(s_tile_soc, s_tile_arc, LV_ALIGN_CENTER, 0, 0);
     s_tile_name = make_label(s_tile, &lv_font_montserrat_16, C_DIM, model.charger_name);
-    lv_obj_set_pos(s_tile_name, 172, 10);
+    lv_obj_set_pos(s_tile_name, 172, 6);
     s_tile_cur = make_label(s_tile, &lv_font_montserrat_48, C_TEXT, "-- A");
-    lv_obj_set_pos(s_tile_cur, 170, 30);
+    lv_obj_set_pos(s_tile_cur, 170, 44);
     s_tile_watt = make_label(s_tile, &lv_font_montserrat_48, C_TEXT, "-- W");   // same size as the amperes
-    lv_obj_set_pos(s_tile_watt, 170, 90);
+    lv_obj_set_pos(s_tile_watt, 170, 98);
     s_tile_pwr = make_label(s_tile, &lv_font_montserrat_20, C_DIM, "");   // battery total: no longer shown
     lv_obj_add_flag(s_tile_pwr, LV_OBJ_FLAG_HIDDEN);
 
@@ -1041,7 +1040,6 @@ void ui_begin()
                 case 4: update_page_status(m, fresh); break;
                 default: update_page_can(m, fresh); break;
             }
-            if (idx != 0) flow_set(s_flow0, 0);
             if (idx != 1) { flow_set(s_fl_in, 0); flow_set(s_fl_out, 0); flow_set(s_fl_bat, 0); flow_set(s_fl_chg, 0); }
         }
         saver_update(m, fresh);
