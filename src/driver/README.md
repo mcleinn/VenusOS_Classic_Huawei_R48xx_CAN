@@ -28,6 +28,16 @@ Sources: harness `docs/PHASE-B-RUNBOOK.md` bench log and `docs/CHARGER-HUAWEI-UN
 | the module itself sends `0x108081FE 01 13 ..` and `0x100011FE` every 3 s | decoded as `module_announce`, not counted as foreign traffic |
 | each charger carries an ESP32 control board that is a CAN master (0.62 s cycle, rewrites the defaults) and drives the fan from the temperatures it reads | boards are cut from the module bus and fed by the display repeater (`huawei/display.py`, configured in `driver.json` "display"); without data the board runs the fan at full speed. Venus claims USB CAN interfaces as VE.Can (profile 1, 250 kbit/s, vecan-dbus) at plug-in and drove board 1 into bus-off: profiles must be set to 0, and a board in bus-off needs its charger power cycled. The adapter re-enumerates when the hub is disturbed (2026-11-02 during re-cabling): the interfaces come back as new netdevs, down; the driver's ports now recover by themselves, so the order in which chargers, boards and adapter are connected does not matter |
 
+### Field use
+
+- **2026-11-09, first unplanned use (grid, via the Quattro's AC-out):** after a grid return the Quattro
+  throttled its charger (frequency-variation flag), so the user plugged the R4875G1 into a house socket
+  for 32 min. The driver took it to 50 A within 23 s of mains present, the DVCC extension gave the
+  Quattro the remaining 98 A (148 - 50), both chargers ran together at 52.4 V. Known gap confirmed: a
+  unit whose AC is off but whose DC side is on the bank stays "Ready" and is counted as an active
+  charger. One 10 s sample read 54.8 A at the start, not reproducible from the logs (rotated).
+  Details in the local evidence notes.
+
 ## Topology this driver is written for
 
 - The Cerbo's two VE.Can RJ45 sockets are **one CAN interface** (`can0`), electrically paralleled. One rectifier is plugged into each socket; both are on the same bus.
