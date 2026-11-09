@@ -886,8 +886,8 @@ static void saver_build()
     lv_obj_set_pos(s_tile_name, 172, 10);
     s_tile_cur = make_label(s_tile, &lv_font_montserrat_48, C_TEXT, "-- A");
     lv_obj_set_pos(s_tile_cur, 170, 30);
-    s_tile_watt = make_label(s_tile, &lv_font_montserrat_40, C_TEXT, "-- W");
-    lv_obj_set_pos(s_tile_watt, 172, 92);
+    s_tile_watt = make_label(s_tile, &lv_font_montserrat_48, C_TEXT, "-- W");   // same size as the amperes
+    lv_obj_set_pos(s_tile_watt, 170, 90);
     s_tile_pwr = make_label(s_tile, &lv_font_montserrat_20, C_DIM, "");   // battery total: no longer shown
     lv_obj_add_flag(s_tile_pwr, LV_OBJ_FLAG_HIDDEN);
 
