@@ -190,26 +190,34 @@ static void fmt_power(char *buf, size_t n, float p, bool arrows = true)
     else        snprintf(buf, n, "%d W", (int)lroundf(p));
 }
 
-// Subtle breathing of a label (text opacity 100 % <-> 86 %) while the charger is charging.
-struct Breath { lv_anim_t anim; bool on = false; };
-static void breath_cb(void *o, int32_t v) { lv_obj_set_style_text_opa((lv_obj_t *)o, v, 0); }
-static void set_breath(Breath &b, lv_obj_t *label, bool on)
+// One pulse per screen while the charger is charging: the current ring and the amperes/watts
+// texts breathe in sync (same period and phase). Ring dips to 40 %, text only to 86 %.
+struct Pulse { lv_anim_t anim; bool on = false; lv_obj_t *arcs[2] = {nullptr, nullptr}; lv_obj_t *labels[2] = {nullptr, nullptr}; };
+static void pulse_exec(void *var, int32_t v)      // v: 0 = fully lit ... 255 = deepest dip
 {
-    if (on == b.on) return;
-    b.on = on;
-    lv_anim_del(label, breath_cb);
-    if (!on) { lv_obj_set_style_text_opa(label, LV_OPA_COVER, 0); return; }
-    lv_anim_init(&b.anim);
-    lv_anim_set_var(&b.anim, label);
-    lv_anim_set_exec_cb(&b.anim, breath_cb);
-    lv_anim_set_values(&b.anim, LV_OPA_COVER, LV_OPA_80 + 15);   // 100 % -> 86 %, barely visible
-    lv_anim_set_time(&b.anim, 1200);
-    lv_anim_set_playback_time(&b.anim, 1200);
-    lv_anim_set_repeat_count(&b.anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_path_cb(&b.anim, lv_anim_path_ease_in_out);
-    lv_anim_start(&b.anim);
+    Pulse *p = (Pulse *)var;
+    const lv_opa_t ring = LV_OPA_COVER - (lv_opa_t)(v * 60 / 100);   // 100 % -> 40 %
+    const lv_opa_t text = LV_OPA_COVER - (lv_opa_t)(v * 14 / 100);   // 100 % -> 86 %
+    for (lv_obj_t *a : p->arcs)   if (a) lv_obj_set_style_arc_opa(a, ring, LV_PART_INDICATOR);
+    for (lv_obj_t *l : p->labels) if (l) lv_obj_set_style_text_opa(l, text, 0);
 }
-static Breath s_breath_main, s_breath_tile, s_breath_main_w, s_breath_tile_w;
+static void set_pulse(Pulse &p, bool on)
+{
+    if (on == p.on) return;
+    p.on = on;
+    lv_anim_del(&p, pulse_exec);
+    if (!on) { pulse_exec(&p, 0); return; }
+    lv_anim_init(&p.anim);
+    lv_anim_set_var(&p.anim, &p);
+    lv_anim_set_exec_cb(&p.anim, pulse_exec);
+    lv_anim_set_values(&p.anim, 0, 255);
+    lv_anim_set_time(&p.anim, 1200);
+    lv_anim_set_playback_time(&p.anim, 1200);
+    lv_anim_set_repeat_count(&p.anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&p.anim, lv_anim_path_ease_in_out);
+    lv_anim_start(&p.anim);
+}
+static Pulse s_pulse_main, s_pulse_tile;
 
 // --- animated flow: a dot travelling along a straight line -------------------------------
 struct Flow {
@@ -263,8 +271,6 @@ static lv_obj_t *s_dots[PAGES];
 
 // page 0
 static lv_obj_t *s_arc, *s_arc_cur, *s_arc_cur2, *s_soc, *s_soc_unit, *s_batt_power, *s_batt_sub;
-static lv_anim_t s_cur_pulse;
-static bool s_cur_pulsing = false;
 static lv_obj_t *s_chg_state, *s_chg_current, *s_chg_volt, *s_chg_watt, *s_chg_temp, *s_chg_limit;
 static lv_obj_t *s_sys_loads, *s_sys_source, *s_sys_state;
 static Flow s_flow0;
@@ -317,12 +323,6 @@ static void set_link_color(lv_obj_t *obj, LinkState st, bool is_badge)
 
 static void arc_anim_cb(void *, int32_t v) { s_arc_shown = v; lv_arc_set_value(s_arc, v); }
 
-static void cur_pulse_cb(void *, int32_t v)
-{
-    lv_obj_set_style_arc_opa(s_arc_cur, v, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_opa(s_arc_cur2, v, LV_PART_INDICATOR);
-}
-
 // Total-current ring inputs shared by page 0 and the screensaver.
 struct RingData { float c1 = 0, c2 = 0, scale = 60; bool charging = false; };
 static RingData ring_data(const Model &m, const Sample &own_cur, bool chg_fresh)
@@ -354,30 +354,13 @@ static void draw_ring(lv_obj_t *top, lv_obj_t *below, const RingData &r)
     lv_arc_set_value(below, (int32_t)lroundf(total * 10));
     lv_arc_set_value(top, (int32_t)lroundf((c1 > scale ? scale : c1) * 10));
 }
-// c1 = first charger (lowest instance), c2 = second, scale = sum of their configured limits.
 static void set_current_ring(float c1, float c2, float scale, bool charging)
 {
-    c1 = c1 < 0 ? 0 : c1; c2 = c2 < 0 ? 0 : c2;
-    if (scale < 10) scale = 10;
-    const int32_t range = (int32_t)lroundf(scale * 10);
-    lv_arc_set_range(s_arc_cur2, 0, range);
-    lv_arc_set_range(s_arc_cur, 0, range);
-    float total = c1 + c2; if (total > scale) total = scale;
-    lv_arc_set_value(s_arc_cur2, (int32_t)lroundf(total * 10));
-    lv_arc_set_value(s_arc_cur, (int32_t)lroundf((c1 > scale ? scale : c1) * 10));
-    if (charging == s_cur_pulsing) return;
-    s_cur_pulsing = charging;
-    lv_anim_del(nullptr, cur_pulse_cb);
-    if (!charging) { cur_pulse_cb(nullptr, LV_OPA_COVER); return; }
-    lv_anim_init(&s_cur_pulse);
-    lv_anim_set_var(&s_cur_pulse, s_arc_cur);
-    lv_anim_set_exec_cb(&s_cur_pulse, cur_pulse_cb);
-    lv_anim_set_values(&s_cur_pulse, LV_OPA_COVER, LV_OPA_40);
-    lv_anim_set_time(&s_cur_pulse, 900);
-    lv_anim_set_playback_time(&s_cur_pulse, 900);
-    lv_anim_set_repeat_count(&s_cur_pulse, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_path_cb(&s_cur_pulse, lv_anim_path_ease_in_out);
-    lv_anim_start(&s_cur_pulse);
+    RingData r; r.c1 = c1; r.c2 = c2; r.scale = scale;
+    draw_ring(s_arc_cur, s_arc_cur2, r);
+    s_pulse_main.arcs[0] = s_arc_cur; s_pulse_main.arcs[1] = s_arc_cur2;
+    s_pulse_main.labels[0] = s_chg_current; s_pulse_main.labels[1] = s_chg_watt;
+    set_pulse(s_pulse_main, charging);
 }
 
 // --- page 0: charger ---------------------------------------------------------------------
@@ -476,12 +459,10 @@ static void update_page_charger(const Model &m, bool fresh)
     if (cur.has()) { snprintf(buf, sizeof buf, "%.1f A", cur.v); lv_label_set_text(s_chg_current, buf); }
     else lv_label_set_text(s_chg_current, "-- A");
     lv_obj_set_style_text_color(s_chg_current, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
-    set_breath(s_breath_main, s_chg_current, running);
     if (vol.has()) { snprintf(buf, sizeof buf, "%.1f V", vol.v); lv_label_set_text(s_chg_volt, buf); }
     if (pwr.has()) { snprintf(buf, sizeof buf, "%d W", (int)lroundf(pwr.v)); lv_label_set_text(s_chg_watt, buf); }
     else lv_label_set_text(s_chg_watt, "-- W");
     lv_obj_set_style_text_color(s_chg_watt, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
-    set_breath(s_breath_main_w, s_chg_watt, running);
     if (tmp.has()) {
         snprintf(buf, sizeof buf, "%d °C", (int)lroundf(tmp.v));
         lv_label_set_text(s_chg_temp, buf);
@@ -824,8 +805,6 @@ static constexpr uint32_t TILE_HOP_MS = 8000;
 
 static lv_obj_t *s_saver_scr, *s_tile;
 static lv_obj_t *s_tile_arc, *s_tile_cur1, *s_tile_cur2, *s_tile_soc, *s_tile_name, *s_tile_cur, *s_tile_watt, *s_tile_pwr;
-static lv_anim_t s_tile_pulse;
-static bool s_tile_pulsing = false;
 static bool s_saver_on = false;
 
 static void tile_hop(lv_timer_t *)
@@ -891,11 +870,6 @@ static void saver_build()
     lv_timer_create(tile_hop, TILE_HOP_MS, nullptr);
 }
 
-static void tile_pulse_cb(void *, int32_t v)
-{
-    lv_obj_set_style_arc_opa(s_tile_cur1, v, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_opa(s_tile_cur2, v, LV_PART_INDICATOR);
-}
 
 static void saver_update(const Model &m, bool fresh)
 {
@@ -916,32 +890,17 @@ static void saver_update(const Model &m, bool fresh)
     const bool running = cur.has() && cur.v > 0.5f && chg_fresh;
     if (cur.has()) { snprintf(buf, sizeof buf, "%.1f A", cur.v); lv_label_set_text(s_tile_cur, buf); }
     lv_obj_set_style_text_color(s_tile_cur, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
-    set_breath(s_breath_tile, s_tile_cur, running);
     {
         const Sample &pw = live_power(m);
         if (pw.has()) { snprintf(buf, sizeof buf, "%d W", (int)lroundf(pw.v)); lv_label_set_text(s_tile_watt, buf); }
         lv_obj_set_style_text_color(s_tile_watt, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
-        set_breath(s_breath_tile_w, s_tile_watt, running);
     }
     {
         const RingData r = ring_data(m, cur, chg_fresh);
         draw_ring(s_tile_cur1, s_tile_cur2, r);
-        if (r.charging != s_tile_pulsing) {
-            s_tile_pulsing = r.charging;
-            lv_anim_del(nullptr, tile_pulse_cb);
-            if (!r.charging) tile_pulse_cb(nullptr, LV_OPA_COVER);
-            else {
-                lv_anim_init(&s_tile_pulse);
-                lv_anim_set_var(&s_tile_pulse, s_tile_cur1);
-                lv_anim_set_exec_cb(&s_tile_pulse, tile_pulse_cb);
-                lv_anim_set_values(&s_tile_pulse, LV_OPA_COVER, LV_OPA_40);
-                lv_anim_set_time(&s_tile_pulse, 900);
-                lv_anim_set_playback_time(&s_tile_pulse, 900);
-                lv_anim_set_repeat_count(&s_tile_pulse, LV_ANIM_REPEAT_INFINITE);
-                lv_anim_set_path_cb(&s_tile_pulse, lv_anim_path_ease_in_out);
-                lv_anim_start(&s_tile_pulse);
-            }
-        }
+        s_pulse_tile.arcs[0] = s_tile_cur1; s_pulse_tile.arcs[1] = s_tile_cur2;
+        s_pulse_tile.labels[0] = s_tile_cur; s_pulse_tile.labels[1] = s_tile_watt;
+        set_pulse(s_pulse_tile, r.charging);
     }
     if (m.batt_power.has()) {
         fmt_power(buf, sizeof buf, m.batt_power.v);
