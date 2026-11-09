@@ -987,17 +987,29 @@ void ui_begin()
     lv_obj_set_pos(s_tv, 0, BAR_H);
     lv_obj_set_scrollbar_mode(s_tv, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_event_cb(s_tv, [](lv_event_t *) { update_dots(); }, LV_EVENT_VALUE_CHANGED, nullptr);
-    // gestures bubble up to the screen: a swipe towards the left edge while on the first page
-    // (finger moving right, where no page exists) starts the screensaver
-    // ... and a swipe onwards from the last page wraps around to the first one.
-    lv_obj_add_event_cb(scr, [](lv_event_t *) {
-        const lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-        lv_obj_t *act = lv_tileview_get_tile_act(s_tv);
-        if (!act) return;
-        const int idx = (int)lv_obj_get_index(act);
-        if (dir == LV_DIR_RIGHT && idx == 0) saver_show(true);
-        else if (dir == LV_DIR_LEFT && idx == PAGES - 1) lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_OFF);
-    }, LV_EVENT_GESTURE, nullptr);
+    // Edge swipes, detected from the raw touch points (LVGL reports no gesture while the tile view
+    // is rubber-banding at an edge): on the first page a swipe towards the left edge (finger moving
+    // right) starts the screensaver, on the last page a swipe onwards wraps around to the first page.
+    lv_timer_create([](lv_timer_t *) {
+        static bool was_pressed = false;
+        static lv_point_t start;
+        lv_indev_t *indev = lv_indev_get_next(nullptr);
+        if (!indev) return;
+        lv_point_t p;
+        lv_indev_get_point(indev, &p);
+        const bool pressed = indev->proc.state == LV_INDEV_STATE_PRESSED;
+        if (pressed && !was_pressed) start = p;
+        if (!pressed && was_pressed && !s_saver_on) {
+            const int dx = p.x - start.x, dy = p.y - start.y;
+            if (abs(dx) > 70 && abs(dy) < 60) {
+                lv_obj_t *act = lv_tileview_get_tile_act(s_tv);
+                const int idx = act ? (int)lv_obj_get_index(act) : 0;
+                if (dx > 0 && idx == 0) saver_show(true);
+                else if (dx < 0 && idx == PAGES - 1) lv_obj_set_tile_id(s_tv, 0, 0, LV_ANIM_OFF);
+            }
+        }
+        was_pressed = pressed;
+    }, 30, nullptr);
 
     lv_obj_t *pg;
     pg = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);  build_page_charger(pg);
