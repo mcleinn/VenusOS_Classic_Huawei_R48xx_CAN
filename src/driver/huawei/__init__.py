@@ -21,4 +21,4 @@ Status 2026-11-04: protocol.VERIFIED is True after the load rounds of 2026-11-03
 started with --control (service run script: marker file /data/huawei/control-enabled); the
 operator switch /Mode is persisted; serials in driver.json "excluded" are never written to.
 """
-VERSION = '0.9.1-budget'
+VERSION = '0.9.2-acpresence'

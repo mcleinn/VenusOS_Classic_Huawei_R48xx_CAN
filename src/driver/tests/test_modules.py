@@ -7,9 +7,11 @@ from huawei import modules as M
 from huawei.canbus import CanFrame
 
 
-def status_burst(addr, ts, voltage=50.0, current=0.0, ac=True, limit_ratio=0.5):
+def status_burst(addr, ts, voltage=50.0, current=0.0, ac=True, limit_ratio=0.5, ac_voltage=None):
     regs = [(0x75, int(voltage * 1024)), (0x81, int(current * 1024)), (0x76, int(limit_ratio * 1024)),
             (0x7F, 40 * 1024)]
+    if ac_voltage is not None:
+        regs.append((0x78, int(ac_voltage * 1024)))
     frames = [CanFrame(P.reply_id(P.CMD_DATA, addr, True), bytes([1, r, 0, 0]) + v.to_bytes(4, 'big'), ts=ts)
               for r, v in regs]
     frames.append(CanFrame(P.reply_id(P.CMD_DATA, addr, False),
@@ -268,3 +270,39 @@ class TestAcks(unittest.TestCase):
         self.assertEqual(m.counters['ack_err'], 1)
         self.assertTrue(m.fault.startswith('ack error on online_current'))
         self.assertFalse(m.current.ack_ok)
+
+
+class TestAcPresence(unittest.TestCase):
+    """0x78 (AC input voltage) decides; the 0x83 bit is the fallback when 0x78 is not in the burst."""
+
+    def setUp(self):
+        self.clock = FakeClock(100.0)
+        self.reg = M.Registry(self.clock, scales={'0000000000A1': 'ratio1024'})
+        for f in [info_serial(1, 100.0, '0000000000A1'), info_char(1, 100.0)]:
+            self.reg.feed(P.decode(f))
+
+    def state_after(self, frames):
+        for f in frames:
+            self.reg.feed(P.decode(f))
+        m = self.reg.modules['0000000000A1']
+        m.evaluate(100.2)
+        return m
+
+    def test_plug_pulled_reads_0v_and_the_unit_goes_to_standby(self):
+        m = self.state_after(status_burst(1, 100.1, ac=True, ac_voltage=0.0))   # bit says ok, voltage says no
+        self.assertIs(m.ac_present(), False)
+        self.assertEqual(m.state, M.STANDBY)
+
+    def test_mains_present_reads_230v(self):
+        m = self.state_after(status_burst(1, 100.1, ac=True, ac_voltage=231.5))
+        self.assertIs(m.ac_present(), True)
+        self.assertIn(m.state, (M.READY, M.INHIBITED))
+
+    def test_voltage_wins_over_a_stale_looking_bit(self):
+        m = self.state_after(status_burst(1, 100.1, ac=False, ac_voltage=228.0))
+        self.assertIs(m.ac_present(), True)
+
+    def test_without_0x78_the_bit_decides(self):
+        m = self.state_after(status_burst(1, 100.1, ac=False))
+        self.assertIs(m.ac_present(), False)
+        self.assertEqual(m.state, M.STANDBY)

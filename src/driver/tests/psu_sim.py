@@ -148,7 +148,7 @@ class PsuSim(object):
         p_out = v * i
         eff = 0.95 if p_out > 100 else 0.80
         vals = {0x0E: self.hours, 0x70: p_out / eff, 0x71: 50.0, 0x72: (p_out / eff) / 230.0,
-                0x73: p_out, 0x74: eff, 0x75: v, 0x76: limit_ratio, 0x78: 230.0,
+                0x73: p_out, 0x74: eff, 0x75: v, 0x76: limit_ratio, 0x78: 230.0 if self.ac_on else 0.0,
                 0x7F: 35.0 + p_out / 150, 0x80: 28.0, 0x81: i, 0x82: i}
         if self.voltage_in_0x85:
             vals[0x85] = vals[0x75]
@@ -158,7 +158,9 @@ class PsuSim(object):
             raw = int(round(vals[reg] * (1 if reg == 0x0E else 1024)))
             out.append((P.reply_id(P.CMD_DATA, self.addr, True), bytes([0x01, reg, 0, 0]) + raw.to_bytes(4, 'big')))
         status = (1 << 9) if self.standby else 0
-        data = bytes([0x01, 0x83, 0 if self.ac_on else 0x20, 0]) + status.to_bytes(4, 'big')
+        if not self.ac_on:
+            status |= 1 << 29                       # input-power-failure, as the R4875G1 reports it
+        data = bytes([0x01, 0x83, 0, 0]) + status.to_bytes(4, 'big')
         out.append((P.reply_id(P.CMD_DATA, self.addr, False), data))
         return out
 

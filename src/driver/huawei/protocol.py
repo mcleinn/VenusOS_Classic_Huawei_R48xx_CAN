@@ -150,7 +150,8 @@ STATUS_LAST_REG = 0x83
 OUT_VOLTAGE_ALT_REG = 0x85
 LIMIT_READBACK_MODELS = ('R4850G2', 'R4875G1')   # community: 0x76 echoes the on-line raw; measured on the R4875G1 2026-11-02; NOT the R4875G5
 CFG_REGS = {0x13: 'module_announce'}      # 0x81 register 0x13: sent by the module itself every 3 s
-STATUS_BITS = {1 << 9: 'standby-flag', 1 << 20: 'fan-error?', 1 << 27: 'output-on'}   # bytes 4-7 word
+STATUS_BITS = {1 << 9: 'standby-flag', 1 << 20: 'fan-error?', 1 << 27: 'output-on',
+               1 << 29: 'input-power-failure'}   # bytes 4-7 word; bit 29 measured 2026-11-04 (AC off)
 # bit 9 follows the 0x32 standby write (1 = flag set), bit 27 = output stage on (both measured 2026-11-01);
 # bit 23 (0x800000) and bits 2/4 seen set on unit 1, meaning unknown
 OUTPUT_ON_BIT = 1 << 27
@@ -294,7 +295,10 @@ def decode_status_data(data):
         flags = [n for bit, n in STATUS_BITS.items() if raw & bit]
         flags += [n for bit, n in STATUS_BITS_HI.items() if hi & bit]
         out.update({'value': raw, 'flags': flags, 'bits_2_5': hi,
-                    'ac_present': not bool(hi & (1 << 29))})
+                    # the R4875G1 sets input-power-failure in the bytes-4-7 word (measured 2026-11-04,
+                    # 00 00 20 02 02 08 with the plug pulled); the community tables put it in the
+                    # bytes-2-5 word. Either one means no AC.
+                    'ac_present': not (bool(raw & (1 << 29)) or bool(hi & (1 << 29)))})
     else:
         out['value'] = round(raw / float(div), 3) if div != 1 else raw
     if unit:

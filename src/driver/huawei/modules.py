@@ -48,6 +48,7 @@ log = logging.getLogger('huawei.modules')
 DISCOVERING = 'discovering'
 READY = 'ready'
 STANDBY = 'standby'
+AC_PRESENT_MIN_V = 100.0      # 0x78 below this = no AC input (reads 0 V with the plug pulled)
 INHIBITED = 'inhibited'
 DEGRADED = 'degraded'
 FAULTED = 'faulted'
@@ -269,7 +270,17 @@ class Module(object):
         return '0x75'
 
     def ac_present(self):
-        if self.status_fresh() and 'ac_present' in self.status:
+        """AC input present? Primary witness: the AC input voltage register 0x78 (0 V with the
+        plug pulled, 221-235 V on mains, both models, measured 2026-11-03/-04/-09). Fallback: the
+        input-power-failure bit of 0x83. A unit without AC keeps its CAN alive from the DC side,
+        so without this it would stay 'ready' and keep its DVCC budget share (seen 2026-11-04 and
+        for four days up to 2026-11-09)."""
+        if not self.status_fresh():
+            return None
+        v = self.status.get('ac_in_voltage_v')
+        if v is not None:
+            return v >= AC_PRESENT_MIN_V
+        if 'ac_present' in self.status:
             return self.status['ac_present']
         return None
 

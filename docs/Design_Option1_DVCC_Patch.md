@@ -120,7 +120,7 @@ Secondary check: the driver reads `/Control/ChargerChargeCurrent` on `com.victro
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `/Settings/Dvcc/ChargerPriority` | 0 | 0 = solar → chargers → Multi; 1 = solar → Multi → chargers |
+| `/Settings/Dvcc/ChargerPriority` | 0 | 0 = solar → chargers → Multi; 1 = solar → Multi → chargers. **Set to 1 on this installation since 2026-11-09** (user decision after the first on-grid run: when the BMS lowers the charge limit near full, the Huawei units drop first and the Quattro keeps charging) |
 | `/Settings/Dvcc/ChargerCompensateVebus` | **0** | 0 = Huawei budget is the battery's own charge limit only (default, chosen 2026-10-22 for the full-battery safety review in §11); 1 = budget also covers the Multi's discharge current (DC-coupled generator path, opt-in after commissioning). With either value the chargers get 0 when the battery limit is 0. |
 | `/Settings/Dvcc/ChargerMaxSoc` | **90** | SOC ceiling for the managed chargers, added 2026-10-22 after the user's full-battery question: at or above this SOC the charger budget is 0 regardless of BMS limits. 100 = off. Unknown SOC = 0. |
 | `/Settings/Dvcc/ChargerResumeSoc` | **85** | Hysteresis: once inhibited, the chargers get a budget again only below this SOC. `/Dvcc/Chargers/SocInhibit` on `com.victronenergy.system` shows the state. |

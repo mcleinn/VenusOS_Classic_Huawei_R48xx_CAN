@@ -208,6 +208,34 @@ class TestChargingPath(VerifiedCase):
         self.assertEqual(b.service(A1)['/State'], 0)
         self.assertFalse(b.engine.registry.modules[A1].able)
 
+    def test_unit_without_ac_leaves_the_budget_to_the_other_unit(self):
+        """2026-11-04/-09: a unit whose AC is cut keeps its CAN alive from the DC side. It must drop
+        to /State 0 (Standby) so the DVCC gives its share to the other unit, and come back by itself
+        when the mains return."""
+        b = ControlBench()
+        b.run(2.0)
+        b.enable(A1)
+        b.enable(B2)
+        b.dvcc = {A1: (25.0, 52.4), B2: (10.0, 52.4)}
+        b.run(10.0)
+        self.assertEqual(b.service(A1)['/State'], 252)
+        self.assertEqual(b.service(B2)['/State'], 252)
+        # plug pulled on unit 2: 0x78 reads 0 V, bit 29 set, CAN still alive
+        b.sims[1].set_ac(False)
+        b.run(4.0)
+        self.assertEqual(b.service(B2)['/Huawei/State'], 'Standby')
+        self.assertEqual(b.service(B2)['/State'], 0)
+        self.assertEqual(b.service(B2)['/Link/ChargeCurrent'], 0.0)     # the DVCC's explicit 0
+        self.assertEqual(b.sims[1].online_i_raw, 0)
+        self.assertEqual(b.service(A1)['/State'], 252)                   # the other unit is untouched
+        self.assertEqual(b.sims[0].online_i_raw, 492)
+        # mains back: ready again within a status poll, allocation resumes without help
+        b.sims[1].set_ac(True)
+        b.run(4.0)
+        self.assertEqual(b.service(B2)['/State'], 252)
+        b.run(6.0)
+        self.assertEqual(b.sims[1].online_i_raw, 197)
+
     def test_budget_deadlock_of_2026_11_04_and_unchanged_limit_is_not_stale(self):
         """Cerbo 2026-11-04 17:41: driver restarted in control mode with the generator running,
         DVCC in control, budget 180 A. The DVCC wrote 0 to the charger because its /State was 0,

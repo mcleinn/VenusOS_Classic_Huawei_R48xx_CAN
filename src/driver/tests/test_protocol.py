@@ -131,6 +131,14 @@ class TestDecode(unittest.TestCase):
         self.assertTrue(d['cont'])
         self.assertEqual(d['flow'], 'PSU->CTL')
 
+    def test_input_power_failure_in_the_bytes_4_7_word_as_the_r4875g1_sets_it(self):
+        # measured 2026-11-04 18:13 UTC, unit 2 with the plug pulled: 01 83 00 00 20 02 02 08
+        d = P.decode(self.frame(0x1081407E, [0x01, 0x83, 0x00, 0x00, 0x20, 0x02, 0x02, 0x08]))
+        self.assertFalse(d['ac_present'])
+        self.assertIn('input-power-failure', d['flags'])
+        d = P.decode(self.frame(0x1081407E, [0x01, 0x83, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00]))
+        self.assertTrue(d['ac_present'])        # output-on only
+
     def test_status_bits_last_frame(self):
         d = P.decode(self.frame(0x1081407E, [0x01, 0x83, 0x20, 0, 0, 0, 0x02, 0x00]))
         self.assertEqual(d['name'], 'status_bits')
