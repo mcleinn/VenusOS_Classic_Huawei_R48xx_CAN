@@ -726,9 +726,9 @@ static void update_page_status(const Model &m, bool)
 {
     char buf[48];
     if (m.wifi == LinkState::Up) snprintf(buf, sizeof buf, "%d dBm · %s", m.wifi_rssi, m.wifi_node);
-    else snprintf(buf, sizeof buf, "%s · reason %d", m.wifi == LinkState::Connecting ? "connecting" : "down", g_wifi_last_reason);
+    else snprintf(buf, sizeof buf, "%s #%d", m.wifi == LinkState::Connecting ? "connecting" : "down", g_wifi_last_reason);   // fits the column
     lv_label_set_text(s_s_wifi.val, buf);
-    snprintf(buf, sizeof buf, "%lu drops · %lu roams · last %d", (unsigned long)g_wifi_drops, (unsigned long)g_wifi_roams, g_wifi_last_reason);
+    snprintf(buf, sizeof buf, "WLAN  %lu drops %lu roams", (unsigned long)g_wifi_drops, (unsigned long)g_wifi_roams);
     lv_label_set_text(s_s_wifi.key, buf);
     lv_label_set_text(s_s_ip.val, m.wifi == LinkState::Up ? m.ip : "--");
     if (m.can == LinkState::Up) snprintf(buf, sizeof buf, "%lu frames", (unsigned long)m.can_frames);

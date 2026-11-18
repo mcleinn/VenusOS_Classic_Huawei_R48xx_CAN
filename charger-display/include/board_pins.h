@@ -37,7 +37,7 @@
 
 // Mounting: landscape. The CO5300 has no hardware rotation; display.cpp rotates in the flush path.
 // 270 or 90 (degrees) selects which long edge is the top; plain numbers so #if can test them.
-#define LCD_ROTATION     90
+#define LCD_ROTATION     270
 #define UI_W             LCD_V_RES   // logical width after rotation
 #define UI_H             LCD_H_RES
 
