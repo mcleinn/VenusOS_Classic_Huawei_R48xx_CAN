@@ -8,8 +8,8 @@ the user-level skill `waveshare-esp32s3-amoled` (general lessons). This file is 
 
 | | MAC (USB serial number) | role |
 |---|---|---|
-| unit 1 | `28:84:85:8d:4a:0c` | development board, runs charger-display; usually COM11 |
-| unit 2 | `28:84:85:8d:4a:d8` | untouched reference; only ever read (flash + eFuses), never written |
+| board 1 | `28:84:85:8d:4a:0c` | display build **d1**, mounted on the replacement charger "Huawei 1" (since 2026-11-18); usually COM11 |
+| board 2 | `28:84:85:8d:4a:d8` | display build **d2**, mounted on charger "Huawei 2" (R4875G1); golden flash image of this board kept in `_local/unit2-golden` |
 
 Golden image of unit 2 (shipped FactoryProgram, 2026-06-02, IDF 5.5.2):
 `_local/unit2-golden/unit2-flash-16MB.bin`, eFuse summary beside it. Git-ignored, keep it.
@@ -106,9 +106,9 @@ python tools/serial_capture.py COM11 30                             # boot log, 
 
 ## Two displays, one firmware
 
-`platformio.ini` has one env per device: `d1` (DISPLAY_ID 1, shows the charger named "Huawei 2",
-OTA hostname charger-display-1, USB COM11) and `d2` (DISPLAY_ID 2, "Huawei 1", charger-display-2,
-USB port from secrets.ini). `include/devices.h` maps the id to the charger name and hostname. The
+`platformio.ini` has one env per device: `d1` (DISPLAY_ID 1, board ..4A:0C, shows "Huawei 1", OTA hostname
+charger-display-1, USB COM11) and `d2` (DISPLAY_ID 2, board ..4A:D8, shows "Huawei 2", charger-display-2, USB
+port from secrets.ini). Names swapped 2026-11-19 to match where the boards are mounted. `include/devices.h` maps the id to the charger name and hostname. The
 own charger is bound by the CustomName the Venus driver publishes, never by "first service seen";
 until that name appears the charger card says "not found". Battery, loads and the total ring are
 identical on both displays.

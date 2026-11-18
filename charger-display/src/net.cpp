@@ -395,6 +395,30 @@ static void http_begin()
             "<input type='file' name='firmware'> <input type='submit' value='Update'></form>"
             "<p>Running: " UI_FW_VERSION "</p></body></html>");
     });
+    // GET /status: the model as JSON, for checks over WLAN without seeing the glass (basic auth)
+    s_http.on("/status", HTTP_GET, [] {
+        if (!s_http.authenticate("ota", OTA_PASSWORD)) return s_http.requestAuthentication();
+        const Model &m = model;
+        char buf[900];
+        snprintf(buf, sizeof buf,
+            "{\"fw\":\"%s %s %s\",\"display\":%d,\"own_charger\":\"%s\",\"uptime_s\":%lu,"
+            "\"wifi\":{\"state\":%d,\"rssi\":%d,\"node\":\"%s\",\"drops\":%lu,\"roams\":%lu,\"last_reason\":%d},"
+            "\"mqtt\":{\"state\":%d,\"msgs\":%lu,\"last_rx_age_s\":%ld,\"charger_instance\":%d},"
+            "\"can\":{\"state\":%d,\"frames\":%lu,\"sets\":%lu,\"acks\":%lu,\"addr\":%d,\"last_rx_age_s\":%ld,"
+            "\"out_v\":%.2f,\"out_a\":%.2f,\"out_w\":%.0f,\"ac_v\":%.1f,\"ac_w\":%.0f,\"t_out\":%.1f,"
+            "\"set_v\":%.2f,\"set_ratio\":%.4f,\"rated_a\":%.1f,\"output_on\":%d,\"ac_present\":%d},"
+            "\"cerbo\":{\"soc\":%.1f,\"batt_w\":%.0f,\"chg_a\":%.1f,\"chg_state\":\"%s\"}}",
+            UI_FW_VERSION, __DATE__, __TIME__, DISPLAY_ID, OWN_CHARGER_NAME, (unsigned long)(millis() / 1000),
+            (int)m.wifi, m.wifi_rssi, m.wifi_node, (unsigned long)g_wifi_drops, (unsigned long)g_wifi_roams, g_wifi_last_reason,
+            (int)m.mqtt, (unsigned long)m.mqtt_msgs, m.mqtt_last_rx ? (long)((millis() - m.mqtt_last_rx) / 1000) : -1L, m.charger_instance,
+            (int)m.can, (unsigned long)m.can_frames, (unsigned long)m.can_sets, (unsigned long)m.can_acks, m.can_addr,
+            m.can_out_a.has() ? (long)(m.can_out_a.age_ms() / 1000) : -1L,
+            m.can_out_v.v, m.can_out_a.v, m.can_out_w.v, m.can_ac_v.v, m.can_ac_w.v, m.can_temp_out.v,
+            m.can_set_v.v, m.can_set_ratio.v, m.can_rated_a.v,
+            m.can_output_on.has() ? (int)m.can_output_on.v : -1, m.can_ac_present.has() ? (int)m.can_ac_present.v : -1,
+            m.soc.v, m.batt_power.v, m.chg_current.v, m.charger_hw_state);
+        s_http.send(200, "application/json", buf);
+    });
     s_http.on("/update", HTTP_POST,
         [] {
             if (!s_http.authenticate("ota", OTA_PASSWORD)) return s_http.requestAuthentication();
