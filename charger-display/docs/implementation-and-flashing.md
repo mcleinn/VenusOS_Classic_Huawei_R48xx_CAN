@@ -49,8 +49,10 @@ src/display.cpp        LVGL display driver: logical 456x280, 2 draw buffers of 4
 src/touch.cpp          FT3168 over Wire (SDA 47, SCL 48, 400 kHz), write/stop/read, NACK = no touch
 src/model.h            Model: link states (wifi/mqtt/can), Venus system/vebus/battery values,
                        charger service values, CAN-decoded values, venus_fresh()
-src/net.cpp            WiFi STA with event log (drop reasons) and roaming (scan for the strongest
-                       node of the SSID when RSSI < -70 dBm, reconnect by BSSID), PubSubClient to
+src/net.cpp            WiFi STA: one plain begin(), SDK auto-reconnect, restart only after 60 s and never
+                       while associated; roaming (scan for the strongest node when RSSI < -70 dBm, by BSSID)
+                       only once connected. Never scan or begin() again while a join is in progress
+                       (2026-11-18: that broke joining completely). PubSubClient to
                        the Cerbo, ~50 subscriptions (system, vebus, battery, charger), keepalive
                        every 30 s, JSON parsing into the model
 src/can.cpp            TWAI listen-only on the Huawei bus (125 kbit/s): decodes status registers

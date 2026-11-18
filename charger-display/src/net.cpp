@@ -30,7 +30,8 @@ static constexpr uint32_t KEEPALIVE_MS = 30000;
 static constexpr uint32_t MQTT_RETRY_MS = 5000;
 // A failed WPA handshake (seen once right after a flash: 4WAY_HANDSHAKE_TIMEOUT / AUTH_FAIL)
 // leaves the station idle; restart the join if nothing connected within this time.
-static constexpr uint32_t WIFI_RESTART_MS = 12000;
+static constexpr uint32_t WIFI_RESTART_MS = 60000;
+static uint32_t s_assoc_t = 0;        // millis() of the last association (join in progress)
 
 // Topic suffixes after N/<portal>/. '+' = any charger instance; we lock onto the first one seen.
 static const char *const SUBS[] = {
@@ -242,6 +243,7 @@ static void on_wifi_event(WiFiEvent_t ev, WiFiEventInfo_t info)
                           g_wifi_last_reason, (unsigned long)g_wifi_drops, model.wifi_rssi);
             break;
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+            s_assoc_t = millis();
             Serial.printf("wifi: associated with %s, channel %d\n", WiFi.BSSIDstr().c_str(), WiFi.channel());
             break;
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
@@ -252,9 +254,9 @@ static void on_wifi_event(WiFiEvent_t ev, WiFiEventInfo_t info)
     }
 }
 
-// First join: let the radio pick. Every retry after a failed join: blocking scan (about 1.5 s)
-// for the strongest node of our SSID and connect to it by BSSID. In a mesh the radio's own pick
-// can be a node that is out of reach from where the display hangs.
+// Plain join: one begin(), the SDK's own reconnect. No scanning and no second begin() while a
+// join is in progress: both destabilised the join on 2026-11-18 ("sta is connecting, return error",
+// association torn down by our own restart). Roaming runs only once connected (roam_check).
 static uint32_t g_wifi_joins = 0;
 static void wifi_start()
 {
@@ -264,29 +266,10 @@ static void wifi_start()
     WiFi.setSleep(false);
     WiFi.setAutoReconnect(true);
     g_wifi_joins++;
-    bool pinned = false;
-    if (g_wifi_joins > 1) {
-        int16_t n = WiFi.scanNetworks(false, false, false, 120, 0, WIFI_SSID);
-        int best = -1, best_rssi = -127;
-        for (int i = 0; i < n; i++) if (WiFi.RSSI(i) > best_rssi) { best = i; best_rssi = WiFi.RSSI(i); }
-        if (best >= 0) {
-            uint8_t bssid[6];
-            memcpy(bssid, WiFi.BSSID(best), 6);
-            const int ch = WiFi.channel(best);
-            Serial.printf("wifi: retry %lu: %d node(s) of our SSID, joining %s ch %d %d dBm\n",
-                          (unsigned long)g_wifi_joins, n, WiFi.BSSIDstr(best).c_str(), ch, best_rssi);
-            WiFi.scanDelete();
-            WiFi.begin(WIFI_SSID, WIFI_PASSWORD, ch, bssid);
-            pinned = true;
-        } else {
-            Serial.printf("wifi: retry %lu: our SSID not seen in the scan\n", (unsigned long)g_wifi_joins);
-            WiFi.scanDelete();
-        }
-    }
-    if (!pinned) WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
     s_wifi_started = millis();
     model.wifi = LinkState::Connecting;
-    Serial.println("wifi: connecting");
+    Serial.printf("wifi: connecting (join %lu)\n", (unsigned long)g_wifi_joins);
 }
 
 // --- roaming --------------------------------------------------------------------------------
@@ -528,7 +511,9 @@ void net_loop()
             model.mqtt = LinkState::Down;
         }
         model.wifi = LinkState::Connecting;
-        if (now - s_wifi_started > WIFI_RESTART_MS) {
+        // only after a long silence, and never while an association is in progress (DHCP pending)
+        const bool associating = s_assoc_t && now - s_assoc_t < 20000;
+        if (now - s_wifi_started > WIFI_RESTART_MS && !associating) {
             WiFi.disconnect();
             wifi_start();
         }
