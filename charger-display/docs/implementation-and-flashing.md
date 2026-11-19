@@ -118,6 +118,15 @@ own charger is bound by the CustomName the Venus driver publishes, never by "fir
 until that name appears the charger card says "not found". Battery, loads and the total ring are
 identical on both displays.
 
+## Network since 2026-11-19: the Pi's own access point
+
+The displays no longer use the house WLAN. The Venus Pi (wired, 192.168.1.14) runs the 2.4 GHz access point
+`charger-net` (connman tethering, gateway/bridge `tether` 192.168.0.1/24, DHCP, NAT to eth0, channel 1) a metre
+from the chargers. `include/secrets.h`: `WIFI_SSID charger-net`, `MQTT_HOST 192.168.0.1`, `VRM_PORTAL_ID 2ccf676684b1`.
+Because the displays are NATed, the notebook cannot reach them directly: use `tools/push_via_pi.sh d1|d2`, which
+builds, copies the image to the Pi and runs the curl upload there (board found by MAC via `ip neigh show dev tether`),
+then prints `/status`. Full write-up: `C:\Dev-Free\CerboGXaspbi\charger-net-ap-and-displays.md`.
+
 ## Updates over WLAN
 
 Two mechanisms are built in; use the HTTP one on this PC:
