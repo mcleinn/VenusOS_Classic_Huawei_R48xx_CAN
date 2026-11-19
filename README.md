@@ -39,6 +39,30 @@ protocol is the same family; every register and scale the driver relies on was m
 units above. Other R48xx models should work with the `conservative` current scale until a load test
 confirms theirs.
 
+## Platforms (2026-11-19)
+
+The driver runs on two firmwares from the same code; only the interface selection and the deploy scripts differ.
+
+| | Cerbo GX | Raspberry Pi 5 (stand-in) |
+| --- | --- | --- |
+| Venus OS / Python | v2.92 / 3.8 | v3.85 / 3.12 |
+| Rectifier bus | VE.Can port, `can0` (SoC controller `1c2bc00.can`) | channel 2 of a gs_usb CAN adapter (CANable 2.5), `gs_usb:1` |
+| `driver.json` | `src/deploy/driver.json` (`interface` unset = `can0`) | `src/deploy/driver.pi.json` (`"interface": "gs_usb:1"`) |
+| Service script | `src/deploy/service/run` (or `run-core`) | `src/deploy/service/run-pi` |
+| DVCC extension (control) | installed, hash-pinned to 2.103-1 | **not ported**: driver stays in telemetry, see `docs/DVCC_Port_Venus_3.85_Assessment.md` |
+| Venus CAN profile of that port | Disabled (0) | Disabled (0) |
+
+`--interface` (or `"interface"` in the config) is either a kernel name or `<driver>:<dev_id>`. `gs_usb:1` selects the
+gs_usb channel whose kernel `dev_id` is 1 (sysfs `/sys/class/net/canX/dev_id`), so the driver follows the hardware
+when `can0`/`can1` are numbered differently after a reboot or a re-plug; it refuses to start when no interface or
+more than one matches, and, as always, when the Venus profile of the resolved interface is not Disabled. On the Pi
+channel 1 (`dev_id` 0) carries the Pylontech BMS link and is never touched. The link manager also clears a leftover
+`listen-only` flag (found 2026-11-19: after a passive capture the link was "up" at 125 kbit/s, nothing was
+acknowledged and a unit repeated one frame 780 times a second).
+
+`boot.sh` runs the DVCC and GUI-tile guards only where those installers exist. Control is requested only while
+`/data/huawei/control-enabled` exists, on either platform; on the Pi that marker has no effect without the DVCC budget.
+
 ## Status (2026-11-05)
 
 Verified on hardware:
@@ -137,6 +161,10 @@ it. **Nothing below enables charging**; that is step 6 and stays off until you t
 - Each rectifier must hold a **persistent default of 0 A** (register 0x04). The driver never writes
   to a unit whose first status burst reports a non-zero stored default (`/Huawei/DefaultLimitOk` = 0).
   The commissioning command is in step 5.
+- Each rectifier must also hold an **active AC input current limit** (register 0x09, non-volatile) that
+  matches its supply, 16 A here (one 16 A RCBO per unit). The limit is a hard ceiling on what the unit
+  draws from the mains and a unit whose stored limit is 0 A keeps its output off (bench 2026-11-03).
+  Factory-fresh units may ship with 0; the write is part of commissioning a new unit (step 5).
 - Keep a backup of the Cerbo's `/data` and note the installed version of `dbus-systemcalc-py`.
 
 ### 1. Copy the files
@@ -149,7 +177,7 @@ scp -r src/driver root@cerbo:/data/huawei/src/
 scp src/deploy/service/run-core root@cerbo:/data/huawei/service/run
 scp src/deploy/service/log/run   root@cerbo:/data/huawei/service/log/run
 scp src/deploy/driver.example.json root@cerbo:/data/huawei/driver.json
-scp src/deploy/boot.sh src/deploy/huawei-status.py src/deploy/huawei-ramp.py src/deploy/ramp-remote.sh root@cerbo:/data/huawei/
+scp src/deploy/boot.sh src/deploy/huawei-status.py src/deploy/huawei-ramp.py src/deploy/ramp-remote.sh src/deploy/bench-noload.py root@cerbo:/data/huawei/
 scp src/patch/install.sh src/patch/patched-dvcc.py src/patch/managedcharger.py root@cerbo:/data/huawei/patch/
 ssh root@cerbo 'chmod +x /data/huawei/boot.sh /data/huawei/service/run /data/huawei/service/log/run \
     /data/huawei/patch/install.sh /data/huawei/ramp-remote.sh'
@@ -222,6 +250,23 @@ temperatures, and appear in the Device List as "Huawei 1" / "Huawei 2". A unit w
 `DefaultLimitOk 0` needs commissioning: with its DC side disconnected (open output, below 40 V) run
 `python3 /data/huawei/huawei-ramp.py --standalone <serial>`, enter `defaults 52.4 0 persist`, then
 let the unit fall back (driver stopped for about 100 s) and check that the readback is 0.
+
+**Every new unit, before its output is connected:** store the AC input current limit and run the no-load
+check in one go (`src/deploy/bench-noload.py`, copied to `/data/huawei/`; the bus is `can0` on a Cerbo, the
+Huawei channel of the USB adapter on the Pi):
+
+```sh
+python3 /data/huawei/bench-noload.py --interface can0 --addr <addr> --volts 50 --amps 5 --hold 60 --ac-limit 16
+```
+
+It writes 0x09 = 16 A active (acknowledged, persists), then an on-line voltage and current limit every
+5 s and prints acks, the 0x76 readback, the open-output voltage, status bits, fan status (0x87) and the
+power-available ratio (0x77); it ends with 0 A. Expected on the R4875G1/G5: the output stage switches
+on with the first non-zero limit and the open terminals show the set voltage. The DMA-48-75 unit
+commissioned 2026-11-19 acknowledged everything but kept its output stage off without a DC bus
+(standby flag set throughout), so for that model the open-output check is skipped and the first
+on-line test is done on the battery. This step was missing from the setup before 2026-11-19; the two
+original units received their 16 A during the load tests of 2026-11-03.
 
 ### 6. Enable control
 

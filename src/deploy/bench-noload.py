@@ -36,11 +36,16 @@ def main():
     ap.add_argument('--scale', default='ratio1024', choices=sorted(P.CURRENT_SCALES))
     ap.add_argument('--hold', type=float, default=60.0)
     ap.add_argument('--max-v', type=float, default=None, help='stop above this open voltage (default volts + 1.5)')
+    ap.add_argument('--ac-limit', type=float, default=None, metavar='AMPS',
+                    help='first store the AC input current limit 0x09 (ACTIVE, non-volatile, 5..20 A); a unit whose '
+                         'stored limit is 0 keeps its output off. Commissioning step for every new unit (16 A here)')
     ap.add_argument('--enable', default='none', choices=['none', 'standby0', 'standby1'],
                     help="output-enable policy: standby0 writes 0x32=0 to enable (1 to disable), standby1 the opposite")
     a = ap.parse_args()
     if not (41.0 <= a.volts <= 58.0):
         sys.exit('volts outside 41..58 V')
+    if a.ac_limit is not None and not (5.0 <= a.ac_limit <= 20.0):
+        sys.exit('AC limit outside 5..20 A (a low stored value can stop the unit from starting)')
     max_v = a.max_v if a.max_v is not None else a.volts + 1.5
 
     link = SocketCanLink(a.interface)
@@ -97,6 +102,18 @@ def main():
             last.get('avail', '-'), last.get('Tout', '-'), last.get('Tin', '-'),
             last.get('fan_raw', '-'), last.get('flags', '-'), last.get('ACV', '-'), last.get('ACW', '-'), acks['ok'], acks['err'], last.get('last_ack', '-')))
 
+    def write_ac_limit(amps):
+        # same layout as huawei-ramp.py write_ac_limit: byte 3 = active flag, bytes 4-7 = A x 1024 (persists)
+        raw = int(round(amps * 1024))
+        data = bytes([0x01, 0x09, 0x00, 0x01]) + raw.to_bytes(4, 'big')
+        before = dict(acks)
+        link.send(CanFrame(P.request_id(P.CMD_SET, a.addr), data, ext=True))
+        pump(1.5)
+        out('AC LIMIT %.1f A (raw %d, active) addr %d: data %s: %s' % (
+            amps, raw, a.addr, data.hex(), 'acked' if acks != before else 'NO ACK') + (' (%s)' % last.get('last_ack', '-')))
+        if acks['err']:
+            sys.exit('AC limit write returned an error ack; not continuing')
+
     out('bench-noload on %s, unit addr %d: %.2f V / %.1f A (%s, nominal %.0f A) for %.0f s, stop above %.1f V' % (
         a.interface, a.addr, a.volts, a.amps, a.scale, a.nominal, a.hold, max_v))
     for r in GET_REGS:
@@ -105,6 +122,10 @@ def main():
     out(status_line('before'))
     if (last.get('I') or 0) > 1.0:
         sys.exit('unit already delivers current: this is not an unloaded unit')
+    if a.ac_limit is not None:
+        write_ac_limit(a.ac_limit)
+        pump(3.0)
+        out(status_line('after AC limit'))
 
     reason = 'hold complete'
     t0 = time.time()
