@@ -153,6 +153,8 @@ CFG_REGS = {0x13: 'module_announce'}      # 0x81 register 0x13: sent by the modu
 STATUS_BITS = {1 << 9: 'standby-flag', 1 << 20: 'fan-error?', 1 << 27: 'output-on',
                1 << 29: 'input-power-failure'}   # bytes 4-7 word; bit 29 measured 2026-11-04 (AC off)
 # bit 9 follows the 0x32 standby write (1 = flag set), bit 27 = output stage on (both measured 2026-11-01);
+# bit 9 is ALSO set by hardware when the slot-detect pins are open (community: 0x200 = standby via pin) and 0x32
+# cannot clear it then: measured 2026-11-19 on a bare DMA-48-75 (R4875G1), every set acked, output never on;
 # bit 23 (0x800000) and bits 2/4 seen set on unit 1, meaning unknown
 OUTPUT_ON_BIT = 1 << 27
 STATUS_BITS_HI = {1 << 29: 'input-power-failure'}                        # bytes 2-5 word

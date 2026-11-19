@@ -156,6 +156,16 @@ it. **Nothing below enables charging**; that is step 6 and stays off until you t
 - Wire the rectifiers to the VE.Can port (RJ45 pin 7 CAN-H, pin 8 CAN-L, pin 3 GND; on the Huawei
   edge connector the top/white pin was CAN-L and the bottom/black pin CAN-H on the tested units).
   Terminate at the rectifier ends, not at the Cerbo. Verify the pinout on your units first.
+- **Enable pins.** A bare module keeps its output stage off, whatever CAN says, until its two slot-detect
+  pins are tied to OUTPUT- (R4850G2 teardown: "connect both the slot detect 1 and slot detect 2 pins to
+  OUTPUT-"; R4875G1 community pad-jump: pins 11 and 12 to DC-, i.e. to pins 1/2). With the pins open the
+  module reports status bit 9 (standby) and acknowledges every set frame without ever energising the
+  output; the standby register 0x32 does not override the pin. On the R4875G1 a further bridge of pins
+  9 and 10 lifts the module's own limit from 53 A to its full 75 A; without it the module reports a
+  52 A rating over CAN (info 0x0001 and 0x88). The add-on boards of the two original units do this
+  wiring; a replacement module without such a board needs it done by hand (found 2026-11-19 on the
+  DMA-48-75, see `src/deploy/bench-noload.py`). Pin numbers come from community sources, not from a
+  Huawei document: check against your module's label/manual before bridging anything.
 - Settings → Services → VE.Can port → **Disabled**. The driver refuses to start while a Victron
   process owns `can0` and configures the link itself (125 kbit/s, `restart-ms 100`).
 - Each rectifier must hold a **persistent default of 0 A** (register 0x04). The driver never writes
@@ -164,7 +174,7 @@ it. **Nothing below enables charging**; that is step 6 and stays off until you t
 - Each rectifier must also hold an **active AC input current limit** (register 0x09, non-volatile) that
   matches its supply, 16 A here (one 16 A RCBO per unit). The limit is a hard ceiling on what the unit
   draws from the mains and a unit whose stored limit is 0 A keeps its output off (bench 2026-11-03).
-  Factory-fresh units may ship with 0; the write is part of commissioning a new unit (step 5).
+  Factory-fresh units may ship with 0; the write is part of commissioning a new unit (step 5). R4875 family only: the register is not supported on the R4850G2 (patagonaa).
 - Keep a backup of the Cerbo's `/data` and note the installed version of `dbus-systemcalc-py`.
 
 ### 1. Copy the files
