@@ -74,6 +74,11 @@ _local/unit2-golden    full flash dump + eFuse summary of the untouched unit 2 (
 
 ## Venus MQTT specifics used
 
+**Venus host since 2026-11-19:** a Raspberry Pi 5 with a newer Venus OS at the Cerbo's old address (the
+Cerbo GX broke down). Its portal id is `2ccf676684b1` (the Cerbo's was `48e7da89187b`); `VRM_PORTAL_ID` in
+`include/secrets.h` must match the host, otherwise the displays subscribe to topics nobody publishes and stay
+at "waiting for data". The ported driver on the Pi publishes the same charger paths (checked 2026-11-19).
+
 - Topics `N/<portal id>/<service>/<instance>/<path>`, payload `{"value": x}`; `null` = invalid.
 - The Cerbo publishes only while `R/<portal id>/keepalive` arrives (every 30 s here; every
   keepalive republishes all values, which is also the initial snapshot after subscribing).
