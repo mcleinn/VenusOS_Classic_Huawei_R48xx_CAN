@@ -53,6 +53,7 @@ def main():
                     help='first store the AC input current limit 0x09 (ACTIVE, non-volatile, 5..20 A); a unit whose '
                          'stored limit is 0 keeps its output off. Commissioning step for every new unit (16 A here)')
     ap.add_argument('--load', action='store_true', help='unit on the battery: let current flow (see module doc)')
+    ap.add_argument('--poll', action='store_true', help='send the status request yourself every second (driver stopped)')
     ap.add_argument('--max-temp', type=float, default=65.0)
     ap.add_argument('--battery', default='com.victronenergy.battery.socketcan_can0', help='battery D-Bus service for CCL/CVL/SOC')
     ap.add_argument('--enable', default='none', choices=['none', 'standby0', 'standby1'],
@@ -82,6 +83,7 @@ def main():
     def pump(seconds):
         end = time.time() + seconds
         while time.time() < end:
+            poll()
             f = link.recv(0.05)
             if f is None:
                 continue
@@ -100,6 +102,13 @@ def main():
             elif d['kind'] == 'ack':
                 acks['ok' if d['ok'] else 'err'] += 1
                 last['last_ack'] = '%s %s' % (d['name'], 'ok' if d['ok'] else 'ERROR')
+
+    poll_t = [0.0]
+
+    def poll():
+        if a.poll and time.time() - poll_t[0] >= 1.0:
+            poll_t[0] = time.time()
+            link.send(CanFrame(P.request_id(P.CMD_DATA, a.addr), P.status_request_data(), ext=True))
 
     def get(reg):
         link.send(CanFrame(P.request_id(P.CMD_GET, a.addr), P.get_data(reg), ext=True))
@@ -149,8 +158,11 @@ def main():
         get(r); pump(0.2)
     pump(3.0)
     out(status_line('before'))
-    if (last.get('I') or 0) > 1.0:
+    base_i = last.get('I') or 0.0          # pre-existing output (accessory load on the terminals), judged relative to it
+    if base_i > 1.0 and not a.load:
         sys.exit('unit already delivers current: this is not an unloaded unit')
+    if base_i > 1.0:
+        out('NOTE: %.2f A flow before any command; stops are judged above this baseline' % base_i)
     bat = {}
     if a.load:
         bat = battery()
@@ -196,7 +208,7 @@ def main():
                         last.get('fan_raw', '-'), last.get('flags', '-'), last.get('Tout', '-'), last.get('Tin', '-'),
                         last.get('ACV', '-'), last.get('ACW', '-'), bat['i'], bat['v'], bat['soc'], bat['ccl'], bat['cvl'], acks['ok'], acks['err']))
                     if acks['err']: stop = 'ack error'
-                    elif cur > a.amps * 1.3 + 0.5: stop = 'current %.2f A above the %.1f A limit: scale is not ratio1024 x nominal' % (cur, a.amps)
+                    elif cur - base_i > a.amps * 1.3 + 0.5: stop = 'current %.2f A above baseline %.2f + the %.1f A limit: scale is not ratio1024 x nominal' % (cur, base_i, a.amps)
                     elif (last.get('V') or 0) > max_v or (bat['v'] or 0) > max_v: stop = 'voltage %.2f / %.2f V above %.2f V' % (last.get('V') or 0, bat['v'] or 0, max_v)
                     elif max(float(last.get('Tout') or 0), float(last.get('Tin') or 0)) > a.max_temp: stop = 'temperature above %.0f C' % a.max_temp
                     elif bat['ccl'] is not None and bat['ccl'] < a.amps: stop = 'BMS CCL fell to %.1f A' % bat['ccl']
@@ -232,9 +244,9 @@ def main():
             out(status_line('after 0 A%s' % (' + disable' if a.enable != 'none' else '')))
             if a.load:
                 for _ in range(10):
-                    if (last.get('I') or 0) < 1.0: break
+                    if (last.get('I') or 0) < base_i + 1.0: break
                     pump(1.0)
-                out('current after 0 A: %.2f A (%s)' % (last.get('I') or 0, 'fell below 1 A' if (last.get('I') or 0) < 1.0 else 'STILL FLOWING: check the unit'))
+                out('current after 0 A: %.2f A (%s)' % (last.get('I') or 0, 'back at the baseline' if (last.get('I') or 0) < base_i + 1.0 else 'STILL FLOWING: check the unit'))
         finally:
             pump(1.0)
             link.close()
