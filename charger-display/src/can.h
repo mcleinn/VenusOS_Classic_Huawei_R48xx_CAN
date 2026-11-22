@@ -9,3 +9,6 @@ void can_loop();
 #include <stdint.h>
 // Test hook: decode a frame as if it came from the bus.
 void can_inject(uint32_t id, const uint8_t *data, uint8_t len);
+#include <stddef.h>
+// Controller diagnostics as JSON fields (no braces), for the /status endpoint.
+void can_diag(char *buf, size_t n);

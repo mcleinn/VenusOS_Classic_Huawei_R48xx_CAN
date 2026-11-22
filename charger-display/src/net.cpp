@@ -9,6 +9,7 @@
 #include <lvgl.h>
 #include <ArduinoJson.h>
 #include "model.h"
+#include "can.h"
 #include "secrets.h"
 #include "devices.h"
 #include "board_pins.h"
@@ -254,9 +255,26 @@ static void on_wifi_event(WiFiEvent_t ev, WiFiEventInfo_t info)
     }
 }
 
+// Known networks (secrets.h): WIFI_SSID is the preferred one, WIFI_SSID2 an alternative on the same
+// LAN (same broker). The one with the strongest node wins at join time and when roaming.
+struct KnownNet { const char *ssid; const char *pass; };
+static const KnownNet KNOWN[] = {
+    { WIFI_SSID, WIFI_PASSWORD },
+#ifdef WIFI_SSID2
+    { WIFI_SSID2, WIFI_PASSWORD2 },
+#endif
+};
+static const KnownNet *known(const String &ssid)
+{
+    for (const KnownNet &k : KNOWN) if (ssid == k.ssid) return &k;
+    return nullptr;
+}
+
 // Plain join: one begin(), the SDK's own reconnect. No scanning and no second begin() while a
 // join is in progress: both destabilised the join on 2026-11-18 ("sta is connecting, return error",
-// association torn down by our own restart). Roaming runs only once connected (roam_check).
+// association torn down by our own restart). The only scan before a join is the blocking one
+// below, done while nothing is connecting, to pick the strongest known network and node.
+// Roaming runs only once connected (roam_check).
 static uint32_t g_wifi_joins = 0;
 static void wifi_start()
 {
@@ -266,10 +284,29 @@ static void wifi_start()
     WiFi.setSleep(false);
     WiFi.setAutoReconnect(true);
     g_wifi_joins++;
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    // blocking scan, about 1.5 s (120 ms per channel): strongest node of any known network
+    const KnownNet *pick = nullptr; int best_rssi = -127, best_i = -1;
+    const int16_t n = WiFi.scanNetworks(false, false, false, 120);
+    for (int i = 0; i < n; i++) {
+        const KnownNet *k = known(WiFi.SSID(i));
+        if (k && WiFi.RSSI(i) > best_rssi) { pick = k; best_rssi = WiFi.RSSI(i); best_i = i; }
+    }
+    if (pick) {
+        uint8_t bssid[6]; memcpy(bssid, WiFi.BSSID(best_i), 6);
+        const int ch = WiFi.channel(best_i);
+        Serial.printf("wifi: scan: %d APs, joining %s node %s ch %d %d dBm (join %lu)\n",
+                      n, pick->ssid, WiFi.BSSIDstr(best_i).c_str(), ch, best_rssi, (unsigned long)g_wifi_joins);
+        WiFi.scanDelete();
+        WiFi.begin(pick->ssid, pick->pass, ch, bssid);
+    } else {
+        Serial.printf("wifi: scan: %d APs, none known; plain join of %s (join %lu)\n", n, KNOWN[0].ssid, (unsigned long)g_wifi_joins);
+        WiFi.scanDelete();
+        pick = &KNOWN[0];
+        WiFi.begin(pick->ssid, pick->pass);
+    }
+    strncpy(model.wifi_ssid, pick->ssid, sizeof model.wifi_ssid - 1);
     s_wifi_started = millis();
     model.wifi = LinkState::Connecting;
-    Serial.printf("wifi: connecting (join %lu)\n", (unsigned long)g_wifi_joins);
 }
 
 // --- roaming --------------------------------------------------------------------------------
@@ -292,7 +329,7 @@ static void roam_check(uint32_t now)
         if (n > 0) {
             int best = -1, best_rssi = -127;
             for (int i = 0; i < n; i++) {
-                if (WiFi.SSID(i) == WIFI_SSID && WiFi.RSSI(i) > best_rssi) { best = i; best_rssi = WiFi.RSSI(i); }
+                if (known(WiFi.SSID(i)) && WiFi.RSSI(i) > best_rssi) { best = i; best_rssi = WiFi.RSSI(i); }
             }
             if (best >= 0) {
                 const int cur_rssi = WiFi.RSSI();
@@ -303,11 +340,13 @@ static void roam_check(uint32_t now)
                     uint8_t bssid[6];
                     memcpy(bssid, WiFi.BSSID(best), 6);
                     const int ch = WiFi.channel(best);
+                    const KnownNet *k = known(WiFi.SSID(best));
                     WiFi.scanDelete();
                     g_wifi_roams++;
-                    Serial.printf("wifi: roaming to the stronger node (roam #%lu)\n", (unsigned long)g_wifi_roams);
+                    Serial.printf("wifi: roaming to the stronger node of %s (roam #%lu)\n", k->ssid, (unsigned long)g_wifi_roams);
+                    strncpy(model.wifi_ssid, k->ssid, sizeof model.wifi_ssid - 1);
                     WiFi.disconnect();
-                    WiFi.begin(WIFI_SSID, WIFI_PASSWORD, ch, bssid);
+                    WiFi.begin(k->ssid, k->pass, ch, bssid);
                     s_wifi_started = now;
                     model.wifi = LinkState::Connecting;
                     model.mqtt = LinkState::Down;
@@ -322,8 +361,8 @@ static void roam_check(uint32_t now)
     s_roam_next = now + ROAM_CHECK_MS;
     if (WiFi.RSSI() > ROAM_RSSI_POOR) return;
     Serial.printf("wifi: rssi %d dBm, scanning for a better node\n", WiFi.RSSI());
-    // async scan limited to our SSID, 120 ms per channel: the connection survives it
-    WiFi.scanNetworks(true, false, false, 120, 0, WIFI_SSID);
+    // async scan of all networks, 120 ms per channel: the connection survives it
+    WiFi.scanNetworks(true, false, false, 120);
     s_scan_running = true;
 }
 
@@ -399,23 +438,25 @@ static void http_begin()
     s_http.on("/status", HTTP_GET, [] {
         if (!s_http.authenticate("ota", OTA_PASSWORD)) return s_http.requestAuthentication();
         const Model &m = model;
-        char buf[900];
+        char diag[240];
+        can_diag(diag, sizeof diag);
+        char buf[1200];
         snprintf(buf, sizeof buf,
             "{\"fw\":\"%s %s %s\",\"display\":%d,\"own_charger\":\"%s\",\"uptime_s\":%lu,"
-            "\"wifi\":{\"state\":%d,\"rssi\":%d,\"node\":\"%s\",\"drops\":%lu,\"roams\":%lu,\"last_reason\":%d},"
+            "\"wifi\":{\"state\":%d,\"ssid\":\"%s\",\"rssi\":%d,\"node\":\"%s\",\"drops\":%lu,\"roams\":%lu,\"last_reason\":%d},"
             "\"mqtt\":{\"state\":%d,\"msgs\":%lu,\"last_rx_age_s\":%ld,\"charger_instance\":%d},"
-            "\"can\":{\"state\":%d,\"frames\":%lu,\"sets\":%lu,\"acks\":%lu,\"addr\":%d,\"last_rx_age_s\":%ld,"
+            "\"can\":{\"enabled\":%d,\"state\":%d,\"frames\":%lu,\"sets\":%lu,\"acks\":%lu,\"addr\":%d,\"last_rx_age_s\":%ld,"
             "\"out_v\":%.2f,\"out_a\":%.2f,\"out_w\":%.0f,\"ac_v\":%.1f,\"ac_w\":%.0f,\"t_out\":%.1f,"
-            "\"set_v\":%.2f,\"set_ratio\":%.4f,\"rated_a\":%.1f,\"output_on\":%d,\"ac_present\":%d},"
+            "\"set_v\":%.2f,\"set_ratio\":%.4f,\"rated_a\":%.1f,\"output_on\":%d,\"ac_present\":%d,%s},"
             "\"cerbo\":{\"soc\":%.1f,\"batt_w\":%.0f,\"chg_a\":%.1f,\"chg_state\":\"%s\"}}",
             UI_FW_VERSION, __DATE__, __TIME__, DISPLAY_ID, OWN_CHARGER_NAME, (unsigned long)(millis() / 1000),
-            (int)m.wifi, m.wifi_rssi, m.wifi_node, (unsigned long)g_wifi_drops, (unsigned long)g_wifi_roams, g_wifi_last_reason,
+            (int)m.wifi, m.wifi_ssid, m.wifi_rssi, m.wifi_node, (unsigned long)g_wifi_drops, (unsigned long)g_wifi_roams, g_wifi_last_reason,
             (int)m.mqtt, (unsigned long)m.mqtt_msgs, m.mqtt_last_rx ? (long)((millis() - m.mqtt_last_rx) / 1000) : -1L, m.charger_instance,
-            (int)m.can, (unsigned long)m.can_frames, (unsigned long)m.can_sets, (unsigned long)m.can_acks, m.can_addr,
+            (int)CAN_ENABLED, (int)m.can, (unsigned long)m.can_frames, (unsigned long)m.can_sets, (unsigned long)m.can_acks, m.can_addr,
             m.can_out_a.has() ? (long)(m.can_out_a.age_ms() / 1000) : -1L,
             m.can_out_v.v, m.can_out_a.v, m.can_out_w.v, m.can_ac_v.v, m.can_ac_w.v, m.can_temp_out.v,
             m.can_set_v.v, m.can_set_ratio.v, m.can_rated_a.v,
-            m.can_output_on.has() ? (int)m.can_output_on.v : -1, m.can_ac_present.has() ? (int)m.can_ac_present.v : -1,
+            m.can_output_on.has() ? (int)m.can_output_on.v : -1, m.can_ac_present.has() ? (int)m.can_ac_present.v : -1, diag,
             m.soc.v, m.batt_power.v, m.chg_current.v, m.charger_hw_state);
         s_http.send(200, "application/json", buf);
     });

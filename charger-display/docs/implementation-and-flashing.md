@@ -125,7 +125,29 @@ The displays no longer use the house WLAN. The Venus Pi (wired, 192.168.1.14) ru
 from the chargers. `include/secrets.h`: `WIFI_SSID charger-net`, `MQTT_HOST 192.168.0.1`, `VRM_PORTAL_ID 2ccf676684b1`.
 Because the displays are NATed, the notebook cannot reach them directly: use `tools/push_via_pi.sh d1|d2`, which
 builds, copies the image to the Pi and runs the curl upload there (board found by MAC via `ip neigh show dev tether`),
-then prints `/status`. Full write-up: `C:\Dev-Free\CerboGXaspbi\charger-net-ap-and-displays.md`.
+then prints `/status`. Full write-up: `C:\Dev-Free\CerboGX
+aspbi\charger-net-ap-and-displays.md`.
+
+## Network since 2026-11-22: two WLANs, the stronger wins
+
+- The Pi's access point is now called **`OrbiPV`** (same passphrase as `charger-net` before; connman tethering,
+  bridge `tether` 192.168.0.1/24, NAT to eth0). It did not come back by itself after the Pi reboot of 2026-11-21
+  (wlan0 rejoined the Orbi as a client), so `/data/ap/orbipv.sh` (started from `/data/rc.local`, 60 s delay)
+  re-enables it and enslaves wlan0 to the bridge when connman forgets to.
+- `include/secrets.h` knows **two networks**: `WIFI_SSID OrbiPV` / `WIFI_SSID2 Orbi` with their passwords.
+  `wifi_start()` does one blocking scan (about 1.5 s, only while nothing is connecting) and joins the strongest node
+  of either network by BSSID and channel; `roam_check()` considers both networks too. The status page and `/status`
+  show the SSID in use. `MQTT_HOST 192.168.1.14` (the Pi's LAN address) works from both: on OrbiPV the Pi is the
+  gateway and delivers to itself.
+- A display on `Orbi` is reachable from the notebook directly (`d1_http`/`d2_http` envs or curl); on `OrbiPV` it sits
+  behind the Pi's NAT, use `tools/push_via_pi.sh`.
+- **Display 2 without CAN:** its transceiver was removed when the WLAN antenna went in (2026-11-22). Build `d2` has
+  `-DCAN_ENABLED=0` (`include/board_pins.h` default 1): no TWAI driver, no CAN badge, no CAN page (5 pages), status
+  page "CAN BUS: not fitted", `/status` `can.enabled 0`. Display 1 (`d1`) keeps the CAN listener.
+- Display 2 ran the 2026-11-08 build until 2026-11-22 (Orbi credentials, no `/update`); it was updated from the Pi
+  with the espota protocol: `tools/push_espota_via_pi.sh d2 <ip>` (espota.py and the image are copied to the Pi, which
+  is on the same LAN and has no inbound firewall rule). Result: build 23:03, joined OrbiPV at -60 dBm (antenna fitted),
+  MQTT up, "Huawei 2".
 
 ## Updates over WLAN
 

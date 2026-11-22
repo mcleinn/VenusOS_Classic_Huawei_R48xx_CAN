@@ -26,6 +26,7 @@ struct Model {
     uint32_t can_frames = 0;
     char ip[16] = "";
     char wifi_node[16] = "";          // last 2 bytes of the BSSID + channel
+    char wifi_ssid[33] = "";          // the network we joined (two are known, see secrets.h)
 
     // Venus system (com.victronenergy.system)
     Sample soc, batt_power, batt_voltage, batt_current, batt_time_to_go, batt_temp;

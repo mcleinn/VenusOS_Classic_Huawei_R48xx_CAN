@@ -1,9 +1,10 @@
 #include "can.h"
+#include "board_pins.h"
+#if CAN_ENABLED
 
 #include <Arduino.h>
 #include "driver/twai.h"
 #include "model.h"
-#include "board_pins.h"
 
 // Huawei R48xx CAN protocol (29-bit ids, 125 kbit/s), as decoded in the Venus driver
 // (C:\Dev-Free\CerboGX_R4850G2_CAN\src\driver\huawei\protocol.py):
@@ -85,6 +86,18 @@ void can_inject(uint32_t id, const uint8_t *data, uint8_t len)
     decode(f);
 }
 
+// Controller diagnostics for /status: state, error counters, bus errors, queued frames.
+void can_diag(char *buf, size_t n)
+{
+    twai_status_info_t st;
+    if (!s_started || twai_get_status_info(&st) != ESP_OK) { snprintf(buf, n, "\"twai\":\"not started\""); return; }
+    const char *state = st.state == TWAI_STATE_RUNNING ? "running" : st.state == TWAI_STATE_BUS_OFF ? "bus-off" :
+                        st.state == TWAI_STATE_RECOVERING ? "recovering" : "stopped";
+    snprintf(buf, n, "\"twai\":\"%s\",\"rx_err\":%lu,\"tx_err\":%lu,\"bus_err\":%lu,\"rx_missed\":%lu,\"rx_overrun\":%lu,\"arb_lost\":%lu,\"rx_queued\":%lu",
+             state, (unsigned long)st.rx_error_counter, (unsigned long)st.tx_error_counter, (unsigned long)st.bus_error_count,
+             (unsigned long)st.rx_missed_count, (unsigned long)st.rx_overrun_count, (unsigned long)st.arb_lost_count, (unsigned long)st.msgs_to_rx);
+}
+
 void can_begin()
 {
     twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT((gpio_num_t)PIN_CAN_TX, (gpio_num_t)PIN_CAN_RX, TWAI_MODE_LISTEN_ONLY);
@@ -117,3 +130,12 @@ void can_loop()
     }
     model.can = (s_last_rx && millis() - s_last_rx < 5000) ? LinkState::Up : LinkState::Down;
 }
+
+#else   // CAN_ENABLED == 0: display without a transceiver (display 2 since 2026-11-22)
+#include <Arduino.h>
+#include "model.h"
+void can_begin() { Serial.println("can: not fitted in this build"); }
+void can_loop() {}
+void can_inject(uint32_t, const uint8_t *, uint8_t) {}
+void can_diag(char *buf, size_t n) { snprintf(buf, n, "\"twai\":\"not fitted\""); }
+#endif

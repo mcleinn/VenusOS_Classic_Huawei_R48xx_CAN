@@ -7,7 +7,7 @@ with CO5300 controller over QSPI, FT3168 touch, QMI8658 IMU, TF slot, Li-ion hea
 Data sources:
 
 - Cerbo GX over MQTT (Venus `dbus-mqtt`, plain MQTT on port 1883 inside the house network).
-- Huawei R48xx over CAN, once the CAN transceiver board is attached (not yet).
+- Huawei R48xx over CAN (listen-only TJA1051T/3), build flag `CAN_ENABLED`; display 2 is built without it since 2026-11-22.
 
 Style guide: Victron GUI v2 (`ref/gui-v2`, shallow clone of github.com/victronenergy/gui-v2,
 git-ignored). Only the colours, proportions and wording are borrowed; the UI is LVGL 8.4.

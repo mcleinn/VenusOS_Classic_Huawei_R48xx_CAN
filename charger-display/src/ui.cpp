@@ -35,7 +35,7 @@ static const lv_color_t C_RED      = LV_COLOR_MAKE(0xF3, 0x5C, 0x58);
 // --- geometry ----------------------------------------------------------------------------
 static constexpr int BAR_H  = 26;
 static constexpr int PAGE_H = UI_H - BAR_H;        // 254
-static constexpr int PAGES  = 6;
+static constexpr int PAGES  = CAN_ENABLED ? 6 : 5;   // the CAN page only with a transceiver
 
 // --- small helpers -----------------------------------------------------------------------
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color, const char *txt = "")
@@ -725,13 +725,14 @@ static void build_page_status(lv_obj_t *pg)
 static void update_page_status(const Model &m, bool)
 {
     char buf[48];
-    if (m.wifi == LinkState::Up) snprintf(buf, sizeof buf, "%d dBm · %s", m.wifi_rssi, m.wifi_node);
+    if (m.wifi == LinkState::Up) snprintf(buf, sizeof buf, "%s %d dBm · %s", m.wifi_ssid, m.wifi_rssi, m.wifi_node);
     else snprintf(buf, sizeof buf, "%s #%d", m.wifi == LinkState::Connecting ? "connecting" : "down", g_wifi_last_reason);   // fits the column
     lv_label_set_text(s_s_wifi.val, buf);
     snprintf(buf, sizeof buf, "WLAN  %lu drops %lu roams", (unsigned long)g_wifi_drops, (unsigned long)g_wifi_roams);
     lv_label_set_text(s_s_wifi.key, buf);
     lv_label_set_text(s_s_ip.val, m.wifi == LinkState::Up ? m.ip : "--");
-    if (m.can == LinkState::Up) snprintf(buf, sizeof buf, "%lu frames", (unsigned long)m.can_frames);
+    if (!CAN_ENABLED) snprintf(buf, sizeof buf, "not fitted");
+    else if (m.can == LinkState::Up) snprintf(buf, sizeof buf, "%lu frames", (unsigned long)m.can_frames);
     else snprintf(buf, sizeof buf, "no transceiver");
     lv_label_set_text(s_s_can.val, buf);
     if (m.mqtt == LinkState::Up) snprintf(buf, sizeof buf, "connected · %lu msgs", (unsigned long)m.mqtt_msgs);
@@ -751,6 +752,7 @@ static void update_page_status(const Model &m, bool)
 }
 
 // --- page 5: CAN bus (passive listener) ----------------------------------------------------
+#if CAN_ENABLED
 static KV s_n_link, s_n_addr, s_n_set, s_n_out, s_n_ac, s_n_temp, s_n_flags, s_n_load, s_n_rated, s_n_ack, s_n_limit, s_n_standby;
 static void build_page_can(lv_obj_t *pg)
 {
@@ -796,6 +798,7 @@ static void update_page_can(const Model &m, bool)
         lv_label_set_text(s_n_flags.val, buf);
     }
 }
+#endif  // CAN_ENABLED
 
 // --- screensaver ---------------------------------------------------------------------------
 // AMOLED burn-in protection without dimming: black screen (unlit pixels) and the key live values
@@ -934,10 +937,15 @@ void ui_begin()
     // status bar
     s_title = make_label(scr, &lv_font_montserrat_14, C_DIM, model.charger_name);
     lv_obj_set_pos(s_title, 12, 7);
+    s_icon_gx = make_badge(scr, "GX");
+#if CAN_ENABLED
     s_icon_can = make_badge(scr, "CAN");
     lv_obj_align(s_icon_can, LV_ALIGN_TOP_RIGHT, -10, 5);
-    s_icon_gx = make_badge(scr, "GX");
     lv_obj_align_to(s_icon_gx, s_icon_can, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+#else
+    s_icon_can = nullptr;
+    lv_obj_align(s_icon_gx, LV_ALIGN_TOP_RIGHT, -10, 5);
+#endif
     s_icon_wifi = make_label(scr, &lv_font_montserrat_16, C_TRACK, LV_SYMBOL_WIFI);
     lv_obj_align_to(s_icon_wifi, s_icon_gx, LV_ALIGN_OUT_LEFT_MID, -8, 0);
 
@@ -977,8 +985,12 @@ void ui_begin()
     pg = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);    build_page_overview(pg);
     pg = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);    build_page_battery(pg);
     pg = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);    build_page_chgdetail(pg);
+#if CAN_ENABLED
     pg = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);    build_page_status(pg);
     pg = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_LEFT);   build_page_can(pg);
+#else
+    pg = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_LEFT);   build_page_status(pg);
+#endif
     for (int i = 0; i < PAGES; i++) {
         lv_obj_clear_flag(lv_obj_get_child(s_tv, i), LV_OBJ_FLAG_SCROLLABLE);   // no scrolling inside a page
     }
@@ -998,7 +1010,7 @@ void ui_begin()
 
         set_link_color(s_icon_wifi, m.wifi, false);
         set_link_color(s_icon_gx, m.mqtt == LinkState::Up && !fresh ? LinkState::Connecting : m.mqtt, true);
-        set_link_color(s_icon_can, m.can, true);
+        if (s_icon_can) set_link_color(s_icon_can, m.can, true);
         update_pulse();
         lv_label_set_text(s_title, m.charger_name);
 
@@ -1011,7 +1023,11 @@ void ui_begin()
                 case 2: update_page_battery(m, fresh); break;
                 case 3: update_page_chgdetail(m, fresh); break;
                 case 4: update_page_status(m, fresh); break;
+#if CAN_ENABLED
                 default: update_page_can(m, fresh); break;
+#else
+                default: break;
+#endif
             }
             if (idx != 1) { flow_set(s_fl_in, 0); flow_set(s_fl_out, 0); flow_set(s_fl_bat, 0); flow_set(s_fl_chg, 0); }
         }

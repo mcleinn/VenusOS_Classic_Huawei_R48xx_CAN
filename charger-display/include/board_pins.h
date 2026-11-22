@@ -44,6 +44,11 @@
 // Display firmware version shown on the status page.
 #define UI_FW_VERSION    "0.2"
 
+// CAN listener on/off per build (-DCAN_ENABLED=0 in platformio.ini for a display without a transceiver:
+// no TWAI driver, no CAN badge, no CAN page, status page says "not fitted"). Default on.
+#ifndef CAN_ENABLED
+#define CAN_ENABLED      1
+#endif
 // CAN transceiver TJA1051T/3 (3.3 V logic via its VIO pin) on the P1 header: TXD <- GPIO17, RXD -> GPIO18.
 // Passive listener on the charger's bus (TWAI listen-only), see src/can.cpp.
 #define PIN_CAN_TX       17
