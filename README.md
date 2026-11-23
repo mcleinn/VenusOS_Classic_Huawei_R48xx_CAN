@@ -24,7 +24,7 @@ hardware listed below. Read the status section before relying on it.
 | Component | Exact device / version |
 | --- | --- |
 | GX device | Victron Cerbo GX (original revision, SoC CAN controller `1c2bc00.can` on the VE.Can port) |
-| Venus OS | **v2.92** with the classic (Qt4/QML) GUI; `dbus-systemcalc-py` **2.103-1** is the only version the DVCC extension installs on (hash-pinned) |
+| Venus OS | **v2.92** (`dbus-systemcalc-py` **2.103-1**, Cerbo GX) and **v3.85** (**2.257-1**, Raspberry Pi); the DVCC extension exists for exactly these two versions, one hash-pinned installer each under `src/patch/` |
 | Rectifier 1 | Huawei **R4875G5**, 69 A nominal (output voltage read from register 0x85) |
 | Rectifier 2 | Huawei **R4875G1**, 75 A nominal (output voltage in 0x75, on-line limit echoed in 0x76) |
 | Battery | Pylontech lithium bank with its CAN BMS on the Cerbo's BMS-Can port (DVCC on, BMS charge limits in force) |
@@ -49,7 +49,7 @@ The driver runs on two firmwares from the same code; only the interface selectio
 | Rectifier bus | VE.Can port, `can0` (SoC controller `1c2bc00.can`) | channel 2 of a gs_usb CAN adapter (CANable 2.5), `gs_usb:1` |
 | `driver.json` | `src/deploy/driver.json` (`interface` unset = `can0`) | `src/deploy/driver.pi.json` (`"interface": "gs_usb:1"`) |
 | Service script | `src/deploy/service/run` (or `run-core`) | `src/deploy/service/run-pi` |
-| DVCC extension (control) | installed, hash-pinned to 2.103-1 | **not ported**: driver stays in telemetry, see `docs/DVCC_Port_Venus_3.85_Assessment.md` |
+| DVCC extension (control) | `src/patch/2.103-1/`, installed 2026-10-22 | `src/patch/2.257-1/`, installed 2026-11-23 (port record `docs/DVCC_Port_Venus_3.85_Assessment.md`) |
 | Venus CAN profile of that port | Disabled (0) | Disabled (0) |
 
 `--interface` (or `"interface"` in the config) is either a kernel name or `<driver>:<dev_id>`. `gs_usb:1` selects the
@@ -61,7 +61,8 @@ channel 1 (`dev_id` 0) carries the Pylontech BMS link and is never touched. The 
 acknowledged and a unit repeated one frame 780 times a second).
 
 `boot.sh` runs the DVCC and GUI-tile guards only where those installers exist. Control is requested only while
-`/data/huawei/control-enabled` exists, on either platform; on the Pi that marker has no effect without the DVCC budget.
+`/data/huawei/control-enabled` exists, on either platform; without the DVCC extension of the device's systemcalc version
+the marker has no effect (no budget, driver stays inhibited).
 
 ## Status (2026-11-05)
 
@@ -136,7 +137,7 @@ The design and the measured facts it rests on are written up in the documents li
 | `src/driver/tests/` | 125 tests with a synchronous PSU simulator and a control-board simulator on an in-process bus |
 | `src/driver/README.md` | Dated engineering notes: what each unit taught the driver, every build since 0.7 |
 | `src/deploy/` | What goes to `/data/huawei` on the Cerbo: service scripts, `boot.sh`, `driver.example.json`, the operator tools; plus the test installation's own `driver.json`, `run` and `huawei-usbcan.conf` (with the optional boards) |
-| `src/patch/` | DVCC extension: `managedcharger.py`, `patched-dvcc.py`, the unified diff, `apply_hunks.py` (source of the hunks), `install.sh`, tests, the pristine upstream 2.103-1 tree (MIT) |
+| `src/patch/` | DVCC extension, one folder per `dbus-systemcalc-py` version (`2.103-1/` for Venus v2.92, `2.257-1/` for v3.85): `managedcharger.py`, `patched-dvcc.py`, the unified diff, `apply_hunks.py` (source of the hunks), `install.sh`, the pristine upstream tree with its tests (MIT); shared tests in `tests/` (`src/patch/README.md`) |
 | `src/classic-gui/` | Optional overview tile: modified QML, diffs, the files as found on the device, installer |
 | `docs/Design_Option1_DVCC_Patch.md` | Design and implementation record of the DVCC extension |
 
@@ -151,8 +152,10 @@ it. **Nothing below enables charging**; that is step 6 and stays off until you t
 
 ### 0. Before you start
 
-- Venus OS v2.92. The DVCC installer checks the SHA-256 of `delegates/dvcc.py` and refuses any other
-  version; on a different version port the hunks in `src/patch/apply_hunks.py` first.
+- Venus OS v2.92 (`dbus-systemcalc-py` 2.103-1) or v3.85 (2.257-1); `opkg list-installed dbus-systemcalc-py`
+  tells which. Use the matching folder under `src/patch/` throughout: its installer checks the SHA-256 of
+  `delegates/dvcc.py` and refuses any other version. For another version port the hunks in that folder's
+  `apply_hunks.py` first (`src/patch/README.md`).
 - Wire the rectifiers to the VE.Can port (RJ45 pin 7 CAN-H, pin 8 CAN-L, pin 3 GND; on the Huawei
   edge connector the top/white pin was CAN-L and the bottom/black pin CAN-H on the tested units).
   Terminate at the rectifier ends, not at the Cerbo. Verify the pinout on your units first.
@@ -188,7 +191,8 @@ scp src/deploy/service/run-core root@cerbo:/data/huawei/service/run
 scp src/deploy/service/log/run   root@cerbo:/data/huawei/service/log/run
 scp src/deploy/driver.example.json root@cerbo:/data/huawei/driver.json
 scp src/deploy/boot.sh src/deploy/huawei-status.py src/deploy/huawei-ramp.py src/deploy/ramp-remote.sh src/deploy/bench-noload.py root@cerbo:/data/huawei/
-scp src/patch/install.sh src/patch/patched-dvcc.py src/patch/managedcharger.py root@cerbo:/data/huawei/patch/
+V=2.103-1   # your dbus-systemcalc-py version: 2.103-1 on Venus v2.92, 2.257-1 on v3.85
+scp src/patch/$V/install.sh src/patch/$V/patched-dvcc.py src/patch/$V/managedcharger.py root@cerbo:/data/huawei/patch/
 ssh root@cerbo 'chmod +x /data/huawei/boot.sh /data/huawei/service/run /data/huawei/service/log/run \
     /data/huawei/patch/install.sh /data/huawei/ramp-remote.sh'
 ```
@@ -221,14 +225,17 @@ dbus -y com.victronenergy.system /Control/ChargerChargeCurrent GetValue   # 1 = 
 ```
 
 `install.sh rollback` restores the pristine file. The boot guard (step 4) re-applies the extension
-after a firmware update only if the new root file system carries the identical 2.103-1 file;
+after a firmware update only if the new root file system carries the identical pristine file of its version;
 anything else leaves `/data/huawei/dvcc_unsupported` behind and the driver keeps `/State` 0, so
 nothing charges on an unknown DVCC.
 
 New settings on `com.victronenergy.settings`: `/Settings/Dvcc/ChargerMaxSoc` and
 `/Settings/Dvcc/ChargerResumeSoc` (optional SOC ceiling for the Huawei budget; 100/98 on the test
-installation means no ceiling, the BMS charge limit ends the charge) and
-`/Settings/Dvcc/ChargerStopWhenInverting`.
+installation means no ceiling, the BMS charge limit ends the charge), `/Settings/Dvcc/ChargerPriority`
+(0 = Huaweis before the Multi, 1 = Multi first) and `/Settings/Dvcc/ChargerCompensateVebus` (1 = the Huawei
+budget may also cover what the Multi is inverting; default 0). A fresh installation starts with the defaults
+90 / 85 / 0 / 0. After `install`, restart the driver once (`svc -t /service/huawei-charger`) so it picks up
+`/Control/ChargerChargeCurrent`.
 
 ### 4. Autostart
 
@@ -333,7 +340,11 @@ installation's files (a pristine `HubData.qml` and an already-modified `Overview
 another device it reports `unknown` or `pristine` and refuses. Apply the portable form instead,
 `src/classic-gui/diffs/huawei-tile-all.diff`, to `/opt/victronenergy/gui/qml/`, then
 `svc -t /service/gui`. The GUI lives in `/opt`, so re-apply after a firmware update. The driver and
-the DVCC extension do not need it; without it the chargers still show in the Device List and VRM.
+the DVCC extension do not need it; without it the chargers still show in the Device List and VRM. On Venus
+v3.85 (Raspberry Pi) the same two-file change is part of that device's classic-GUI modifications
+(`/data/gui-mods/`, ported 2026-11-18); it binds the same `/Dvcc/Chargers/*` paths, so it needs the 2.257-1
+extension to show anything. VRM itself lists the chargers in the Device List and the Advanced widgets; its
+production dashboard has no box for AC chargers of any make.
 
 ## Operation
 

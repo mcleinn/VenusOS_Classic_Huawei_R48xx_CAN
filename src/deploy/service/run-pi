@@ -1,0 +1,35 @@
+#!/bin/sh
+# daemontools run script for the Huawei charger driver on a Raspberry Pi running Venus OS v3.x
+# (tested: Pi 5, v3.85, Python 3.12). Install it as /data/huawei/service/run. The rectifiers are on
+# channel 2 of a gs_usb CAN adapter (CANable 2.5 Candlelight); channel 1 carries the Pylontech BMS
+# link and belongs to Venus (profile "CAN-bus BMS LV 500 kbit/s"), so it must never be touched.
+#
+# The interface is selected by hardware, not by name: `gs_usb:1` = the gs_usb channel whose kernel
+# dev_id is 1. can0/can1 follow USB enumeration order; dev_id does not. Venus must have the
+# profile of that channel on Disabled (0); the driver refuses to start otherwise and brings the link
+# up itself at 125 kbit/s. No display repeater on this platform (display block stays out of
+# driver.json; the ESP32-S3 display is a separate project).
+#
+# Control (writing on-line setpoints) is requested only while /data/huawei/control-enabled exists.
+# Control additionally needs the DVCC budget from the DVCC extension for this systemcalc version
+# (src/patch/2.257-1 for v3.85, installed in /data/huawei/patch 2026-11-23); without it the driver
+# stays inhibited whatever the marker says.
+CONTROL=""
+if [ -e /data/huawei/control-enabled ]; then
+	CONTROL="--control"
+	echo "*** starting huawei-charger (driver, CONTROL: /data/huawei/control-enabled present) ***"
+else
+	echo "*** starting huawei-charger (driver, telemetry-only: /data/huawei/control-enabled absent) ***"
+fi
+exec 2>&1
+
+# wait for Venus to bring the adapter up (the CANable is enumerated late at boot)
+n=0
+while ! ls /sys/class/net/can*/dev_id >/dev/null 2>&1; do
+	n=$((n + 1))
+	[ "$n" -ge 120 ] && { echo "no CAN interface after ${n} s, retry in 30 s"; sleep 30; exit 1; }
+	sleep 1
+done
+
+cd /data/huawei/src/driver || exit 1
+exec softlimit -d 150000000 -s 1000000 -a 150000000 python3 -u -m huawei.main --interface gs_usb:1 --expected 2 --config /data/huawei/driver.json --log-level INFO $CONTROL
