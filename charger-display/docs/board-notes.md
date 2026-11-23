@@ -63,7 +63,7 @@ The controller wants even start / odd end coordinates (2-pixel alignment).
   (full 16 MB image read from the untouched second unit), then unplug/replug USB.
 - Golden image layout: bootloader 0x0, partitions 0x8000 (nvs 0x9000/0x6000, phy_init 0xf000/0x1000,
   factory app 0x10000/0x600000), nothing programmed above 0x2c8990. Bootloader header byte 3 = 0x3f.
-- Unit 1 = MAC 28:84:85:8d:4a:0c (COM11), unit 2 = MAC ...:4a:d8 (COM12). Unit 2 is the untouched
+- Unit 1 = board `mac1` in secrets.ini (COM11), unit 2 = `mac2` (COM12). Unit 2 is the untouched
   reference; experiments run on unit 1 only.
 - Root cause (independent review of the disassembled shipped app vs the Apr-2025 factory app):
   identical init table, pixel format, PCLK, reset pin and I2C setup; the ONLY display-relevant

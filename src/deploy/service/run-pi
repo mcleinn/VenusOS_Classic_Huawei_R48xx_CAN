@@ -8,7 +8,8 @@
 # dev_id is 1. can0/can1 follow USB enumeration order; dev_id does not. Venus must have the
 # profile of that channel on Disabled (0); the driver refuses to start otherwise and brings the link
 # up itself at 125 kbit/s. No display repeater on this platform (display block stays out of
-# driver.json; the ESP32-S3 display is a separate project).
+# driver.json; the ESP32-S3 display is a separate project). --dcsource publishes the display-only
+# com.victronenergy.dcsource mirror per unit (monitor mode -2 "AC charger") that VRM draws.
 #
 # Control (writing on-line setpoints) is requested only while /data/huawei/control-enabled exists.
 # Control additionally needs the DVCC budget from the DVCC extension for this systemcalc version
@@ -32,4 +33,4 @@ while ! ls /sys/class/net/can*/dev_id >/dev/null 2>&1; do
 done
 
 cd /data/huawei/src/driver || exit 1
-exec softlimit -d 150000000 -s 1000000 -a 150000000 python3 -u -m huawei.main --interface gs_usb:1 --expected 2 --config /data/huawei/driver.json --log-level INFO $CONTROL
+exec softlimit -d 150000000 -s 1000000 -a 150000000 python3 -u -m huawei.main --interface gs_usb:1 --expected 2 --dcsource --config /data/huawei/driver.json --log-level INFO $CONTROL

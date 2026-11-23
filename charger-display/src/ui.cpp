@@ -5,11 +5,12 @@
 // gliding live values) takes over after SAVER_AFTER_MS without touch; touch or BOOT returns.
 //
 //   page 0  Charger      arc gauge of the battery + charger card + loads card (the daily view)
-//   page 1  Overview     AC in -> Quattro -> loads, battery and charger, with animated flows
-//   page 2  Battery      Pylontech details (BMS limits, modules, cells, temperature, time to go)
-//   page 3  Charger      Huawei details (AC in, output, limits, acks, firmware)
-//   page 4  Status       WLAN / Cerbo / CAN links, uptime, memory, firmware
-//   page 5  CAN bus      what the listener hears on the charger bus (sets, status, acks)
+//   page 1  Pause        one big button: hold this display's charger at 0 A (temporary, see model.h)
+//   page 2  Overview     AC in -> Quattro -> loads, battery and charger, with animated flows
+//   page 3  Battery      Pylontech details (BMS limits, modules, cells, temperature, time to go)
+//   page 4  Charger      Huawei details (AC in, output, limits, acks, firmware)
+//   page 5  Status       WLAN / Cerbo / CAN links, uptime, memory, firmware
+//   page 6  CAN bus      what the listener hears on the charger bus (sets, status, acks)
 //
 // Colours: Victron gui-v2 themes/color/ColorDesign.json (dark scheme).
 #include "ui.h"
@@ -19,6 +20,7 @@
 #include <math.h>
 #include "model.h"
 #include "board_pins.h"
+#include "net.h"
 
 // --- palette (gui-v2 ColorDesign.json) ---------------------------------------------------
 static const lv_color_t C_BG       = LV_COLOR_MAKE(0x14, 0x14, 0x14);  // gray1
@@ -35,7 +37,7 @@ static const lv_color_t C_RED      = LV_COLOR_MAKE(0xF3, 0x5C, 0x58);
 // --- geometry ----------------------------------------------------------------------------
 static constexpr int BAR_H  = 26;
 static constexpr int PAGE_H = UI_H - BAR_H;        // 254
-static constexpr int PAGES  = CAN_ENABLED ? 6 : 5;   // the CAN page only with a transceiver
+static constexpr int PAGES  = CAN_ENABLED ? 7 : 6;   // the CAN page only with a transceiver
 
 // --- small helpers -----------------------------------------------------------------------
 static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font, lv_color_t color, const char *txt = "")
@@ -493,7 +495,112 @@ static void update_page_charger(const Model &m, bool fresh)
     if (m.system_state.has()) { lv_label_set_text(s_sys_state, system_state_text((int)m.system_state.v)); lv_obj_align(s_sys_state, LV_ALIGN_TOP_RIGHT, 0, 0); }
 }
 
-// --- page 1: system overview (gui-v2 overview idiom: boxes and flows) ----------------------
+// --- page 1: pause -------------------------------------------------------------------------
+// One big toggle that holds this display's charger at 0 A whatever DVCC asks. The pause lives in
+// this display only: re-sent to the driver every 20 s, dropped by the driver 90 s after the last
+// request, so switching the display off or rebooting it ends the pause by itself.
+static lv_obj_t *s_p_btn, *s_p_btn_lbl, *s_p_btn_sub, *s_p_amps, *s_p_watt, *s_p_state;
+static Pulse s_pulse_pause;
+static lv_point_t s_p_press;     // where the finger came down on the button
+// Toggle only on a tap: a swipe that starts on the button must page, not pause. LVGL already
+// withholds CLICKED once the tile view takes the gesture over, the distance check is the belt
+// to that brace.
+static void pause_btn_cb(lv_event_t *e)
+{
+    lv_indev_t *indev = lv_indev_get_act();
+    lv_point_t p = {0, 0};
+    if (indev) lv_indev_get_point(indev, &p);
+    if (lv_event_get_code(e) == LV_EVENT_PRESSED) { s_p_press = p; return; }
+    if (indev && lv_indev_get_scroll_obj(indev)) return;
+    if (abs(p.x - s_p_press.x) > 20 || abs(p.y - s_p_press.y) > 20) return;
+    net_set_pause(!model.pause_wanted);
+}
+
+static void build_page_pause(lv_obj_t *pg)
+{
+    lv_obj_t *t = make_label(pg, &lv_font_montserrat_12, C_DIM, "CHARGER PAUSE"); lv_obj_set_pos(t, 12, 6);
+    s_p_btn = lv_btn_create(pg);
+    lv_obj_remove_style_all(s_p_btn);
+    lv_obj_set_size(s_p_btn, 300, 108);
+    lv_obj_set_pos(s_p_btn, (UI_W - 300) / 2, 30);
+    lv_obj_set_style_radius(s_p_btn, 18, 0);
+    lv_obj_set_style_bg_opa(s_p_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_p_btn, C_CARD, 0);
+    lv_obj_set_style_bg_color(s_p_btn, C_TRACK, LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(s_p_btn, 3, 0);
+    lv_obj_set_style_border_color(s_p_btn, C_TRACK, 0);
+    lv_obj_clear_flag(s_p_btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_p_btn, pause_btn_cb, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(s_p_btn, pause_btn_cb, LV_EVENT_CLICKED, nullptr);
+    s_p_btn_lbl = make_label(s_p_btn, &lv_font_montserrat_40, C_TEXT, LV_SYMBOL_PAUSE "  PAUSE");
+    lv_obj_align(s_p_btn_lbl, LV_ALIGN_CENTER, 0, -10);
+    s_p_btn_sub = make_label(s_p_btn, &lv_font_montserrat_14, C_DIM, "tap to block charging");
+    lv_obj_align(s_p_btn_sub, LV_ALIGN_CENTER, 0, 30);
+    // "should be -> is": the unit's allowed current and its actual current, plus the watts, in the
+    // main page's size and pulse, so a tap shows its effect at once (50 A -> 0 A while blocked)
+    s_p_amps = make_label(pg, &lv_font_montserrat_40, C_TEXT, "-- A " LV_SYMBOL_RIGHT " -- A");
+    lv_obj_set_width(s_p_amps, UI_W - 24);
+    lv_obj_set_style_text_align(s_p_amps, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(s_p_amps, 12, 142);
+    s_p_watt = make_label(pg, &lv_font_montserrat_20, C_TEXT, "-- W");
+    lv_obj_set_width(s_p_watt, UI_W - 24);
+    lv_obj_set_style_text_align(s_p_watt, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(s_p_watt, 12, 188);
+    s_p_state = make_label(pg, &lv_font_montserrat_14, C_TEXT, "");
+    lv_obj_set_width(s_p_state, UI_W - 24);
+    lv_obj_set_style_text_align(s_p_state, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(s_p_state, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(s_p_state, 12, 216);
+    s_pulse_pause.labels[0] = s_p_amps;
+    s_pulse_pause.labels[1] = s_p_watt;
+}
+
+static void update_page_pause(const Model &m, bool fresh)
+{
+    char buf[96];
+    const bool reported = m.hw_paused.has() && m.hw_paused.v > 0.5f && fresh;
+    const bool want = m.pause_wanted;
+    lv_obj_set_style_bg_color(s_p_btn, want ? C_ORANGE : C_CARD, 0);
+    lv_obj_set_style_border_color(s_p_btn, want ? C_ORANGE : C_TRACK, 0);
+    lv_label_set_text(s_p_btn_lbl, want ? LV_SYMBOL_PLAY "  RESUME" : LV_SYMBOL_PAUSE "  PAUSE");
+    lv_obj_set_style_text_color(s_p_btn_lbl, want ? C_BG : C_TEXT, 0);
+    lv_label_set_text(s_p_btn_sub, want ? "charging blocked - tap to lift the block" : "tap to block charging (this unit only)");
+    lv_obj_set_style_text_color(s_p_btn_sub, want ? C_BG : C_DIM, 0);
+    lv_obj_align(s_p_btn_lbl, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_align(s_p_btn_sub, LV_ALIGN_CENTER, 0, 30);
+
+    const Sample &cur = live_current(m), &pwr = live_power(m);
+    const bool chg_fresh = charger_data_fresh(m);
+    const bool running = cur.has() && cur.v > 0.5f && chg_fresh;
+    // "should be": the DVCC allowance while it hands one out, otherwise the unit's configured limit
+    // (while blocked the DVCC gives 0, the limit is what the unit would get back)
+    float target = -1;
+    if (m.link_limit.has() && m.link_limit.v > 0.5f) target = m.link_limit.v;
+    else for (int i = 0; i < Model::MAX_CHARGERS; i++)
+        if (m.chargers[i].instance == m.charger_instance && m.chargers[i].limit.has()) target = m.chargers[i].limit.v;
+    if (target >= 0 && cur.has()) snprintf(buf, sizeof buf, "%d A " LV_SYMBOL_RIGHT " %.1f A", (int)lroundf(target), cur.v);
+    else if (cur.has()) snprintf(buf, sizeof buf, "%.1f A", cur.v);
+    else snprintf(buf, sizeof buf, "-- A");
+    lv_label_set_text(s_p_amps, buf);
+    lv_obj_set_style_text_color(s_p_amps, running ? C_GREEN : want && chg_fresh ? C_ORANGE : chg_fresh ? C_TEXT : C_TRACK, 0);
+    if (pwr.has()) { snprintf(buf, sizeof buf, "%d W", (int)lroundf(pwr.v)); lv_label_set_text(s_p_watt, buf); }
+    else lv_label_set_text(s_p_watt, "-- W");
+    lv_obj_set_style_text_color(s_p_watt, running ? C_GREEN : chg_fresh ? C_TEXT : C_TRACK, 0);
+    set_pulse(s_pulse_pause, running);
+
+    const float amps = cur.has() ? cur.v : 0.0f;
+    (void)amps;
+    if (!m.charger_seen || m.charger_instance < 0) snprintf(buf, sizeof buf, "charger not found on the Cerbo");
+    else if (m.mqtt != LinkState::Up || !fresh) snprintf(buf, sizeof buf, "no link to the Cerbo - the block cannot be %s", want ? "held" : "sent");
+    else if (want && reported) snprintf(buf, sizeof buf, "blocked by this display - ends when the display is switched off");
+    else if (want) snprintf(buf, sizeof buf, "block requested, waiting for the driver");
+    else if (reported) snprintf(buf, sizeof buf, "%s blocked by another display", m.charger_name);
+    else snprintf(buf, sizeof buf, "%s: %s, %.1f A", m.charger_name, charger_state_text(), amps);
+    lv_label_set_text(s_p_state, buf);
+    lv_obj_set_style_text_color(s_p_state, want ? C_ORANGE : fresh ? C_TEXT : C_TRACK, 0);
+}
+
+// --- page 2: system overview (gui-v2 overview idiom: boxes and flows) ----------------------
 // Layout (page coords):   [AC IN]--->[QUATTRO]--->[LOADS]      row 1, y 14..86
 //                         [BATTERY]<--|      [CHARGER]--->    row 2, y 134..242
 static void build_page_overview(lv_obj_t *pg)
@@ -982,14 +1089,15 @@ void ui_begin()
 
     lv_obj_t *pg;
     pg = lv_tileview_add_tile(s_tv, 0, 0, LV_DIR_RIGHT);  build_page_charger(pg);
-    pg = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);    build_page_overview(pg);
-    pg = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);    build_page_battery(pg);
-    pg = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);    build_page_chgdetail(pg);
+    pg = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_HOR);    build_page_pause(pg);
+    pg = lv_tileview_add_tile(s_tv, 2, 0, LV_DIR_HOR);    build_page_overview(pg);
+    pg = lv_tileview_add_tile(s_tv, 3, 0, LV_DIR_HOR);    build_page_battery(pg);
+    pg = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);    build_page_chgdetail(pg);
 #if CAN_ENABLED
-    pg = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_HOR);    build_page_status(pg);
-    pg = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_LEFT);   build_page_can(pg);
+    pg = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_HOR);    build_page_status(pg);
+    pg = lv_tileview_add_tile(s_tv, 6, 0, LV_DIR_LEFT);   build_page_can(pg);
 #else
-    pg = lv_tileview_add_tile(s_tv, 4, 0, LV_DIR_LEFT);   build_page_status(pg);
+    pg = lv_tileview_add_tile(s_tv, 5, 0, LV_DIR_LEFT);   build_page_status(pg);
 #endif
     for (int i = 0; i < PAGES; i++) {
         lv_obj_clear_flag(lv_obj_get_child(s_tv, i), LV_OBJ_FLAG_SCROLLABLE);   // no scrolling inside a page
@@ -1019,17 +1127,18 @@ void ui_begin()
             int idx = act ? (int)lv_obj_get_index(act) : 0;
             switch (idx) {
                 case 0: update_page_charger(m, fresh); break;
-                case 1: update_page_overview(m, fresh); break;
-                case 2: update_page_battery(m, fresh); break;
-                case 3: update_page_chgdetail(m, fresh); break;
-                case 4: update_page_status(m, fresh); break;
+                case 1: update_page_pause(m, fresh); break;
+                case 2: update_page_overview(m, fresh); break;
+                case 3: update_page_battery(m, fresh); break;
+                case 4: update_page_chgdetail(m, fresh); break;
+                case 5: update_page_status(m, fresh); break;
 #if CAN_ENABLED
                 default: update_page_can(m, fresh); break;
 #else
                 default: break;
 #endif
             }
-            if (idx != 1) { flow_set(s_fl_in, 0); flow_set(s_fl_out, 0); flow_set(s_fl_bat, 0); flow_set(s_fl_chg, 0); }
+            if (idx != 2) { flow_set(s_fl_in, 0); flow_set(s_fl_out, 0); flow_set(s_fl_bat, 0); flow_set(s_fl_chg, 0); }
         }
         saver_update(m, fresh);
     }, 250, nullptr);

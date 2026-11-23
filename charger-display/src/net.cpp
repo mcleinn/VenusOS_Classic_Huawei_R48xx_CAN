@@ -65,6 +65,7 @@ static const char *const SUBS[] = {
     "charger/+/Huawei/SentCurrent",
     "charger/+/Huawei/AckOk",
     "charger/+/Huawei/Fault",
+    "charger/+/Huawei/Paused",
     "charger/+/FirmwareVersion",
     "charger/+/Ac/In/L1/I",
     "charger/+/Ac/In/L1/F",
@@ -181,7 +182,7 @@ static void on_message(char *topic, uint8_t *payload, unsigned int len)
                 m.chg_connected = m.chg_state = m.chg_mode = Sample();
                 m.chg_current = m.chg_voltage = m.chg_power = m.chg_temp = Sample();
                 m.link_limit = m.ac_power = m.ac_voltage = m.ac_current = m.ac_freq = Sample();
-                m.hw_sent_current = m.hw_ack_ok = m.hw_fault = Sample();
+                m.hw_sent_current = m.hw_ack_ok = m.hw_fault = m.hw_paused = Sample();
                 Serial.printf("mqtt: own charger '%s' is instance %d\n", OWN_CHARGER_NAME, inst);
             }
         }
@@ -228,6 +229,7 @@ static void on_message(char *topic, uint8_t *payload, unsigned int len)
         else if (!strcmp(p, "Huawei/SentCurrent")) m.hw_sent_current.set(f);
         else if (!strcmp(p, "Huawei/AckOk"))       m.hw_ack_ok.set(f);
         else if (!strcmp(p, "Huawei/Fault"))       m.hw_fault.set(f);
+        else if (!strcmp(p, "Huawei/Paused"))      m.hw_paused.set(f);
     }
 }
 
@@ -310,7 +312,7 @@ static void wifi_start()
 }
 
 // --- roaming --------------------------------------------------------------------------------
-// The ESP32 joins the first access point that answers and never roams. In a mesh (Orbi) that
+// The ESP32 joins the first access point that answers and never roams. In a mesh WLAN that
 // can be a far satellite: -85 dBm was seen right next to the router. When the signal is poor we
 // scan for the strongest node of our SSID and reconnect to it explicitly (BSSID + channel).
 static constexpr int ROAM_RSSI_POOR = -70;        // dBm; below this we look for a better node
@@ -460,6 +462,17 @@ static void http_begin()
             m.soc.v, m.batt_power.v, m.chg_current.v, m.charger_hw_state);
         s_http.send(200, "application/json", buf);
     });
+    // GET /pause?on=1|0: the pause button over WLAN (same semantics as the touch button: held by this
+    // display, re-sent every 20 s, lapses in the driver 90 s after the display stops); GET /pause: state
+    s_http.on("/pause", HTTP_GET, [] {
+        if (!s_http.authenticate("ota", OTA_PASSWORD)) return s_http.requestAuthentication();
+        if (s_http.hasArg("on")) net_set_pause(s_http.arg("on") == "1");
+        char buf[160];
+        snprintf(buf, sizeof buf, "{\"pause_wanted\":%d,\"paused_reported\":%d,\"charger_instance\":%d,\"last_sent_age_s\":%ld}",
+                 (int)model.pause_wanted, model.hw_paused.has() && model.hw_paused.v > 0.5f ? 1 : 0, model.charger_instance,
+                 model.pause_sent_t ? (long)((millis() - model.pause_sent_t) / 1000) : -1L);
+        s_http.send(200, "application/json", buf);
+    });
     s_http.on("/update", HTTP_POST,
         [] {
             if (!s_http.authenticate("ota", OTA_PASSWORD)) return s_http.requestAuthentication();
@@ -537,6 +550,27 @@ static void mqtt_try_connect()
     Serial.println("mqtt: connected, subscribed, keepalive sent");
 }
 
+// Pause request to the driver: W/<portal>/charger/<instance>/Huawei/PauseRequest. A non-zero,
+// changing value holds the charger at 0 A for 90 s in the driver (vedbus drops a repeated value,
+// hence the counter); 0 releases at once. Re-sent every PAUSE_RESEND_MS while the pause is wanted.
+static constexpr uint32_t PAUSE_RESEND_MS = 20000;
+static void publish_pause(bool on)
+{
+    model.pause_sent_t = millis();
+    if (model.charger_instance < 0 || !s_mqtt.connected()) return;
+    char topic[80], payload[24];
+    snprintf(topic, sizeof topic, "W/%s/charger/%d/Huawei/PauseRequest", VRM_PORTAL_ID, model.charger_instance);
+    snprintf(payload, sizeof payload, "{\"value\": %lu}", on ? (unsigned long)(++model.pause_counter) : 0UL);
+    s_mqtt.publish(topic, payload);
+    Serial.printf("mqtt: pause %s -> %s\n", on ? "hold" : "release", topic);
+}
+
+void net_set_pause(bool on)
+{
+    model.pause_wanted = on;
+    publish_pause(on);
+}
+
 void net_begin()
 {
     snprintf(s_prefix, sizeof s_prefix, "N/%s/", VRM_PORTAL_ID);
@@ -596,4 +630,5 @@ void net_loop()
     }
     s_mqtt.loop();
     if (now - s_last_keepalive >= KEEPALIVE_MS) publish_keepalive();
+    if (model.pause_wanted && now - model.pause_sent_t >= PAUSE_RESEND_MS) publish_pause(true);
 }

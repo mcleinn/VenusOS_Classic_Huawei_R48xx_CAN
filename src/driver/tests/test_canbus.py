@@ -97,8 +97,27 @@ class TestLinkManager(unittest.TestCase):
             lm.ensure_up()
         argvs = [' '.join(c) for c in calls]
         self.assertIn('ip link set can0 down', argvs)
-        self.assertIn('ip link set can0 type can bitrate 125000 restart-ms 100', argvs)
+        self.assertIn('ip link set can0 type can bitrate 125000 restart-ms 100 listen-only off', argvs)
         self.assertIn('ip link set can0 up', argvs)
+
+    def test_stale_listen_only_flag_is_detected_and_cleared(self):
+        """2026-11-19: a passive capture left `listen-only on` on the interface; the link was up at
+        125 kbit/s so ensure_up() returned without touching it, the controller never ACKed and the
+        unit repeated its frame 780 times a second."""
+        calls = []
+
+        def run(argv):
+            calls.append(' '.join(argv))
+            if argv[:3] == ['ip', '-details', 'link']:
+                listen = '<LISTEN-ONLY> ' if not any('listen-only off' in c for c in calls) else ''
+                return 0, ('6: can1: <NOARP,UP,LOWER_UP,ECHO> mtu 16 state UP\n    link/can\n    can %sstate '
+                           'ERROR-ACTIVE restart-ms 100\n    bitrate 125000 sample-point 0.875' % listen)
+            return 0, ''
+        lm = C.LinkManager('can1', profile_getter=lambda: 0, runner=run)
+        self.assertTrue(lm.status()['listen_only'])
+        lm.ensure_up()
+        self.assertIn('ip link set can1 type can bitrate 125000 restart-ms 100 listen-only off', calls)
+        self.assertFalse(lm.status()['listen_only'])
 
     def test_ensure_up_noop_when_already_correct(self):
         run, calls = self.runner_factory(up=True, state='ERROR-ACTIVE', bitrate=125000)
@@ -180,3 +199,63 @@ class TestCaptures(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestResolveInterface(unittest.TestCase):
+    """`gs_usb:<dev_id>` picks a CAN interface by driver and channel index, not by the
+    can0/can1 name (Raspberry Pi stand-in, 2026-11-19: Pylontech on channel 0, Huawei on 1)."""
+
+    def make(self, ifaces):
+        """ifaces: {name: (driver, dev_id)} -> kwargs for resolve_interface"""
+        links, ids = {}, {}
+        for name, (drv, dev_id) in ifaces.items():
+            links['/sys/class/net/%s/device/driver' % name] = '../../../../bus/usb/drivers/%s' % drv
+            ids['/sys/class/net/%s/dev_id' % name] = '0x%x\n' % dev_id
+
+        def readlink(path):
+            try:
+                return links[path.replace('\\', '/')]
+            except KeyError:
+                raise OSError(2, 'no such link', path)
+
+        def read(path):
+            try:
+                return ids[path.replace('\\', '/')]
+            except KeyError:
+                raise OSError(2, 'no such file', path)
+        return dict(root='/sys/class/net', listdir=lambda root: sorted(ifaces) + ['lo', 'eth0'],
+                    readlink=readlink, read=read)
+
+    def test_plain_name_is_passed_through(self):
+        self.assertEqual(C.resolve_interface('can0', **self.make({})), 'can0')
+
+    def test_channel_two_of_gs_usb(self):
+        kw = self.make({'can0': ('gs_usb', 0), 'can1': ('gs_usb', 1)})
+        self.assertEqual(C.resolve_interface('gs_usb:1', **kw), 'can1')
+        self.assertEqual(C.resolve_interface('gs_usb:0', **kw), 'can0')
+
+    def test_follows_the_channel_when_the_names_swap(self):
+        kw = self.make({'can0': ('gs_usb', 1), 'can1': ('gs_usb', 0)})
+        self.assertEqual(C.resolve_interface('gs_usb:1', **kw), 'can0')
+
+    def test_builtin_port_is_never_a_gs_usb_channel(self):
+        kw = self.make({'can0': ('sun4i_can', 1), 'can1': ('gs_usb', 0)})
+        with self.assertRaises(C.CanError):
+            C.resolve_interface('gs_usb:1', **kw)
+
+    def test_no_match_and_ambiguous_are_errors(self):
+        with self.assertRaises(C.CanError) as cm:
+            C.resolve_interface('gs_usb:1', **self.make({'can0': ('gs_usb', 0)}))
+        self.assertIn('no CAN interface', str(cm.exception))
+        with self.assertRaises(C.CanError) as cm:
+            C.resolve_interface('gs_usb:1', **self.make({'can0': ('gs_usb', 1), 'can2': ('gs_usb', 1)}))
+        self.assertIn('ambiguous', str(cm.exception))
+
+    def test_bad_spec(self):
+        with self.assertRaises(C.CanError):
+            C.resolve_interface('gs_usb:x', **self.make({}))
+
+    def test_dev_id_reads_hex_and_decimal(self):
+        kw = self.make({'can0': ('gs_usb', 1)})
+        self.assertEqual(C.iface_dev_id('can0', kw['read'], '/sys/class/net'), 1)
+        self.assertIsNone(C.iface_dev_id('can9', kw['read'], '/sys/class/net'))

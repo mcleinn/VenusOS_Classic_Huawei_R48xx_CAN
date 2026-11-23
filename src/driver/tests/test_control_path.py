@@ -618,3 +618,43 @@ class TestSlowWindDown(VerifiedCase):
         b.run(30.0)
         self.assertIsNone(m.fault)
         self.assertAlmostEqual(b.service(A1)['/Dc/0/Current'], 10.0, places=0)
+
+
+class TestDisplayPause(VerifiedCase):
+    def test_pause_request_holds_lapses_and_releases(self):
+        from huawei.control import PAUSE_HOLD_S
+        b = ControlBench()
+        b.run(2.0)
+        b.enable(A1)
+        b.dvcc = {A1: (25.0, 52.4)}
+        b.run(8.0)
+        sim = b.sims[0]
+        s1 = b.service(A1)
+        self.assertEqual(sim.online_i_raw, 492)
+        self.assertEqual(s1['/Huawei/Paused'], 0)
+        # a display asks for a pause: zero within a tick, state 0 (no DVCC budget, tile hidden)
+        s1.set_value_from_bus('/Huawei/PauseRequest', 1)
+        b.run(0.4)
+        self.assertEqual(sim.online_i_raw, 0)
+        self.assertIn('paused from the display', s1['/Huawei/LimitingReason'])
+        self.assertEqual(s1['/Huawei/Paused'], 1)
+        self.assertEqual(s1['/State'], 0)
+        # refreshed within the hold (changing counter): stays paused
+        b.run(PAUSE_HOLD_S - 10)
+        s1.set_value_from_bus('/Huawei/PauseRequest', 2)
+        b.run(PAUSE_HOLD_S - 10)
+        self.assertEqual(sim.online_i_raw, 0)
+        self.assertEqual(s1['/Huawei/Paused'], 1)
+        # no refresh: the pause runs out by itself and the unit ramps back
+        b.run(20.0)
+        self.assertEqual(s1['/Huawei/Paused'], 0)
+        b.run(8.0)
+        self.assertEqual(sim.online_i_raw, 492)
+        # explicit release
+        s1.set_value_from_bus('/Huawei/PauseRequest', 3)
+        b.run(0.4)
+        self.assertEqual(sim.online_i_raw, 0)
+        s1.set_value_from_bus('/Huawei/PauseRequest', 0)
+        b.run(8.0)
+        self.assertEqual(sim.online_i_raw, 492)
+        self.assertEqual(s1['/Huawei/Paused'], 0)

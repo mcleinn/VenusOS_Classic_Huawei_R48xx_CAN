@@ -8,8 +8,8 @@ the user-level skill `waveshare-esp32s3-amoled` (general lessons). This file is 
 
 | | MAC (USB serial number) | role |
 |---|---|---|
-| board 1 | `28:84:85:8d:4a:0c` | display build **d1**, mounted on the replacement charger "Huawei 1" (since 2026-11-18); usually COM11 |
-| board 2 | `28:84:85:8d:4a:d8` | display build **d2**, mounted on charger "Huawei 2" (R4875G1); golden flash image of this board kept in `_local/unit2-golden` |
+| board 1 | `mac1` in `secrets.ini` | display build **d1**, mounted on the replacement charger "Huawei 1" (since 2026-11-18); usually COM11 |
+| board 2 | `mac2` in `secrets.ini` | display build **d2**, mounted on charger "Huawei 2" (R4875G1); golden flash image of this board kept in `_local/unit2-golden` |
 
 Golden image of unit 2 (shipped FactoryProgram, 2026-06-02, IDF 5.5.2):
 `_local/unit2-golden/unit2-flash-16MB.bin`, eFuse summary beside it. Git-ignored, keep it.
@@ -75,7 +75,7 @@ _local/unit2-golden    full flash dump + eFuse summary of the untouched unit 2 (
 ## Venus MQTT specifics used
 
 **Venus host since 2026-11-19:** a Raspberry Pi 5 with a newer Venus OS at the Cerbo's old address (the
-Cerbo GX broke down). Its portal id is `2ccf676684b1` (the Cerbo's was `48e7da89187b`); `VRM_PORTAL_ID` in
+Cerbo GX broke down). Its portal id differs from the Cerbo's; `VRM_PORTAL_ID` in
 `include/secrets.h` must match the host, otherwise the displays subscribe to topics nobody publishes and stay
 at "waiting for data". The ported driver on the Pi publishes the same charger paths (checked 2026-11-19).
 
@@ -120,33 +120,32 @@ identical on both displays.
 
 ## Network since 2026-11-19: the Pi's own access point
 
-The displays no longer use the house WLAN. The Venus Pi (wired, 192.168.1.14) runs the 2.4 GHz access point
-`charger-net` (connman tethering, gateway/bridge `tether` 192.168.0.1/24, DHCP, NAT to eth0, channel 1) a metre
-from the chargers. `include/secrets.h`: `WIFI_SSID charger-net`, `MQTT_HOST 192.168.0.1`, `VRM_PORTAL_ID 2ccf676684b1`.
+The displays no longer use the house WLAN. The Venus Pi (wired, `venus_lan_ip` in `secrets.ini`) runs a 2.4 GHz access point
+(`ap_ssid` in `secrets.ini`) (connman tethering, gateway/bridge `tether` 192.168.0.1/24, DHCP, NAT to eth0, channel 1) a metre
+from the chargers. `include/secrets.h`: `WIFI_SSID` = the AP, `MQTT_HOST 192.168.0.1`, `VRM_PORTAL_ID` = the Pi's.
 Because the displays are NATed, the notebook cannot reach them directly: use `tools/push_via_pi.sh d1|d2`, which
 builds, copies the image to the Pi and runs the curl upload there (board found by MAC via `ip neigh show dev tether`),
-then prints `/status`. Full write-up: `C:\Dev-Free\CerboGX
-aspbi\charger-net-ap-and-displays.md`.
+then prints `/status`. Full write-up in the private operations notes (outside this repository).
 
 ## Network since 2026-11-22: two WLANs, the stronger wins
 
-- The Pi's access point is now called **`OrbiPV`** (same passphrase as `charger-net` before; connman tethering,
+- The Pi's access point was renamed (new `ap_ssid`, same passphrase; connman tethering,
   bridge `tether` 192.168.0.1/24, NAT to eth0). It did not come back by itself after the Pi reboot of 2026-11-21
-  (wlan0 rejoined the Orbi as a client), so `/data/ap/orbipv.sh` (started from `/data/rc.local`, 60 s delay)
+  (wlan0 rejoined the house WLAN as a client), so a small script started from `/data/rc.local` (60 s delay)
   re-enables it and enslaves wlan0 to the bridge when connman forgets to.
-- `include/secrets.h` knows **two networks**: `WIFI_SSID OrbiPV` / `WIFI_SSID2 Orbi` with their passwords.
+- `include/secrets.h` knows **two networks**: `WIFI_SSID` (the Pi's AP) / `WIFI_SSID2` (the house WLAN) with their passwords.
   `wifi_start()` does one blocking scan (about 1.5 s, only while nothing is connecting) and joins the strongest node
   of either network by BSSID and channel; `roam_check()` considers both networks too. The status page and `/status`
-  show the SSID in use. `MQTT_HOST 192.168.1.14` (the Pi's LAN address) works from both: on OrbiPV the Pi is the
+  show the SSID in use. `MQTT_HOST` = the Pi's LAN address works from both: on the AP the Pi is the
   gateway and delivers to itself.
-- A display on `Orbi` is reachable from the notebook directly (`d1_http`/`d2_http` envs or curl); on `OrbiPV` it sits
+- A display on the house WLAN is reachable from the notebook directly (`d1_http`/`d2_http` envs or curl); on the AP it sits
   behind the Pi's NAT, use `tools/push_via_pi.sh`.
 - **Display 2 without CAN:** its transceiver was removed when the WLAN antenna went in (2026-11-22). Build `d2` has
   `-DCAN_ENABLED=0` (`include/board_pins.h` default 1): no TWAI driver, no CAN badge, no CAN page (5 pages), status
   page "CAN BUS: not fitted", `/status` `can.enabled 0`. Display 1 (`d1`) keeps the CAN listener.
-- Display 2 ran the 2026-11-08 build until 2026-11-22 (Orbi credentials, no `/update`); it was updated from the Pi
+- Display 2 ran the 2026-11-08 build until 2026-11-22 (house-WLAN credentials, no `/update`); it was updated from the Pi
   with the espota protocol: `tools/push_espota_via_pi.sh d2 <ip>` (espota.py and the image are copied to the Pi, which
-  is on the same LAN and has no inbound firewall rule). Result: build 23:03, joined OrbiPV at -60 dBm (antenna fitted),
+  is on the same LAN and has no inbound firewall rule). Result: build 23:03, joined the AP at -60 dBm (antenna fitted),
   MQTT up, "Huawei 2".
 
 ## Updates over WLAN
@@ -203,3 +202,18 @@ Two mechanisms are built in; use the HTTP one on this PC:
   charger's answers (status registers, acks). Protocol and register tables: the Huawei driver in
   `C:\Dev-Free\CerboGX_R4850G2_CAN\src\driver\huawei\protocol.py`.
 - The "CAN" badge in the status bar turns green when frames are being received.
+
+## Pause page (2026-11-23)
+
+Page 2 (right after the main page) is a single big button: **PAUSE** blocks this display's charger, **RESUME** lifts
+the block. Mechanism: the display publishes `W/<portal>/charger/<instance>/Huawei/PauseRequest` `{"value": n}` with a
+counter that changes on every send (vedbus ignores a repeated value), re-sent every 20 s while the pause is wanted; the
+Venus driver holds the unit at 0 A for 90 s per request and reports `/Huawei/Paused` (subscribed, shown on the page).
+Nothing is persisted on either side: a display that is switched off, rebooted or loses its link lets the pause lapse.
+The block concerns only the charger this display is assigned to (`OWN_CHARGER_NAME`). Lifting it does not start
+charging by itself: the operator switch, DVCC budget and BMS still decide. A swipe that starts on the button pages
+instead of toggling (distance check on press/release plus LVGL's scroll hand-over). Under the button:
+`<allowed> A -> <actual> A` (DVCC allowance while it hands one out, otherwise the unit's configured limit) and the watts,
+pulsing like the main page while charging, so a tap shows its effect at once. For tests over WLAN:
+`GET /pause?on=1|0` (basic auth `ota`), `GET /pause` returns the state. First live use 13:30 UTC on display 2 while the
+house was on a weak mains supply: Paused 1 in the driver within a second of the tap.

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Huawei R4850G2 charger driver, process entry for Venus OS v2.92 (Cerbo GX).
+"""Huawei R4850G2 charger driver, process entry for Venus OS v2.92 (Cerbo GX, Python 3.8) and
+Venus OS v3.x (Raspberry Pi, Python 3.12).
 
-    python3 -m huawei.main [--interface can0] [--expected 2] [--dcsource]
+    python3 -m huawei.main [--interface can0|gs_usb:1] [--expected 2] [--dcsource]
                            [--capture /data/huawei/log/can.log] [--config /data/huawei/driver.json]
                            [--control] [--no-link-setup] [--quiet-start 75]
                            [--display can3=<serial>[:<board_addr>] ...]
@@ -17,7 +18,14 @@ Start sequence:
   6. on SIGTERM/SIGINT: commander shutdown (zero current if a CanCommander ever exists),
      services marked offline, exit 0.
 
---display can3=708A85B00972 attaches the display repeater (display.py) for that unit's
+--interface is the CAN interface of the rectifier bus: a kernel name (`can0`, the Cerbo's VE.Can port,
+the default) or `<driver>:<dev_id>` (`gs_usb:1` = channel 2 of a USB gs_usb adapter), resolved through
+sysfs at start so a shifted can0/can1 numbering cannot put the driver on another bus (the Pylontech BMS
+link on the Raspberry Pi is channel 1). The config's "interface" and "device" keys do the same without
+command-line arguments; an explicit --interface/--device wins. Whatever it resolves to must have the
+Venus CAN profile Disabled (0), otherwise the driver refuses to start.
+
+--display can3=<serial> attaches the display repeater (display.py) for that unit's
 control board on that interface; repeatable; the JSON config's "display" section is the
 same thing. A display interface that is owned by Venus is logged and skipped; one that is
 missing or down is retried every few seconds for as long as the driver runs, and a port
@@ -46,7 +54,7 @@ sys.path.insert(1, '/opt/victronenergy/dbus-systemcalc-py/ext/velib_python')
 from huawei import VERSION                                  # noqa: E402
 from huawei import protocol as P                            # noqa: E402
 from huawei.canbus import SocketCanLink, LinkManager, CandumpWriter, CanError   # noqa: E402
-from huawei.canbus import iface_device, iface_driver, USB_ADAPTER_DRIVER     # noqa: E402
+from huawei.canbus import iface_device, iface_driver, USB_ADAPTER_DRIVER, VECAN_DEVICE, resolve_interface   # noqa: E402
 from huawei.modules import Registry                         # noqa: E402
 from huawei.control import DvccWatchdog, make_commander     # noqa: E402
 from huawei.engine import Engine, EngineFailure, QUIET_START_S as Engine_QUIET, BENCH_MARKER   # noqa: E402
@@ -55,6 +63,12 @@ log = logging.getLogger('huawei.main')
 DEFAULT_CONFIG = '/data/huawei/driver.json'
 SYSTEM_SERVICE_WAIT_S = 180.0     # boot: how long to wait for dbus-systemcalc
 FANKICK_FILE = '/data/huawei/fankick'   # experiment knob: lines 'ifname REGHEX RAW' -> board sees RAW for that status reg
+
+
+def connection_label(ifname):
+    """/Mgmt/Connection text: the Cerbo's built-in VE.Can port keeps its old label, anything else
+    (a USB adapter channel on a Raspberry Pi) is a plain CAN socket."""
+    return ('VE.Can socket %s' if iface_device(ifname) == VECAN_DEVICE else 'CAN socket %s') % ifname
 
 
 def marker_age(path):
@@ -66,7 +80,7 @@ def marker_age(path):
 
 
 def parse_display_spec(spec):
-    """'can3=708A85B00972[:1]' -> ('can3', {'serial': '708A85B00972', 'board_addr': 1})"""
+    """'can3=0A0A0A0A0A01[:1]' -> ('can3', {'serial': '0A0A0A0A0A01', 'board_addr': 1})"""
     if '=' not in spec:
         raise SystemExit('--display: expected <interface>=<serial>[:<board_addr>], got %r' % spec)
     ifname, rest = spec.split('=', 1)
@@ -90,10 +104,14 @@ def load_config(path, display_specs=()):
     """{"scales": {"<serial_hex>": "ratio1024"}, "names": {"<serial_hex>": "Huawei links"},
        "display": {"can3": {"serial": "<serial_hex>", "board_addr": 1}}}
     --display arguments override the file's "display" section per interface."""
-    cfg = {'scales': {}, 'names': {}, 'display': {}, 'output_enable': 'none', 'excluded': []}
+    cfg = {'scales': {}, 'names': {}, 'display': {}, 'output_enable': 'none', 'excluded': [],
+           'interface': None, 'device': None}
     if path and os.path.exists(path):
         with open(path) as fh:
             data = json.load(fh)
+        for k in ('interface', 'device'):
+            if data.get(k):
+                cfg[k] = str(data[k])
         cfg['output_enable'] = str(data.get('output_enable', 'none'))
         from huawei.control import OUTPUT_ENABLE_POLICIES
         if cfg['output_enable'] not in OUTPUT_ENABLE_POLICIES:
@@ -122,7 +140,9 @@ def load_config(path, display_specs=()):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--interface', default='can0')
+    ap.add_argument('--interface', default=None, metavar='NAME|DRIVER:DEV_ID',
+                    help="CAN interface of the rectifier bus: a name ('can0') or '<driver>:<dev_id>' "
+                         "('gs_usb:1', channel 2 of a USB adapter); default: config 'interface', else can0")
     ap.add_argument('--device', default=None, metavar='SYSFS_DEV',
                     help='refuse to start unless --interface is backed by this device (e.g. 1c2bc00.can, '
                          'the Cerbo VE.Can controller); interface names follow probe order and can shift')
@@ -140,8 +160,21 @@ def main(argv=None):
     args = ap.parse_args(argv)
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),
                         format='%(asctime)s %(levelname)s %(name)s %(message)s')
-    log.info('huawei driver %s starting on %s (protocol verified: %s)', VERSION, args.interface, P.VERIFIED)
     cfg = load_config(args.config, args.display)
+    spec = args.interface or cfg['interface'] or 'can0'
+    try:
+        args.interface = resolve_interface(spec)
+    except CanError as e:
+        log.error('%s', e)
+        return 4
+    if args.device is None:
+        args.device = cfg['device']
+    log.info('huawei driver %s starting on %s%s (protocol verified: %s)', VERSION, args.interface,
+             '' if spec == args.interface else ' (resolved from %s)' % spec, P.VERIFIED)
+    for ifname in cfg['display']:
+        if ifname == args.interface:
+            log.error('display interface %s is the rectifier bus itself; refusing to start', ifname)
+            return 4
 
     import dbus
     from dbus.mainloop.glib import DBusGMainLoop
@@ -190,9 +223,16 @@ def main(argv=None):
 
     clock = time.monotonic
     watchdog = DvccWatchdog(clock)
-    control_flag = VeDbusItemImport(bus, 'com.victronenergy.system', '/Control/ChargerChargeCurrent',
-                                    eventCallback=lambda svc, path, changes: watchdog.feed_control_flag(changes.get('Value')))
-    watchdog.feed_control_flag(control_flag.get_value())
+    # /Control/ChargerChargeCurrent is published by the patched dvcc.py only (Venus v2.92 + the DVCC
+    # extension). A stock dbus-systemcalc (e.g. Venus v3.x without the extension) does not have the
+    # path: the watchdog then simply never sees the control flag and the driver stays in telemetry.
+    try:
+        control_flag = VeDbusItemImport(bus, 'com.victronenergy.system', '/Control/ChargerChargeCurrent',
+                                        eventCallback=lambda svc, path, changes: watchdog.feed_control_flag(changes.get('Value')))
+        watchdog.feed_control_flag(control_flag.get_value())
+    except Exception as e:
+        log.warning('/Control/ChargerChargeCurrent not available on com.victronenergy.system (%r): '
+                    'no DVCC extension on this firmware, telemetry only', e)
     commander = make_commander(clock, args.control, cfg['output_enable'])
     capture = CandumpWriter(args.capture, args.interface, clock=time.time) if args.capture else None
 
@@ -249,7 +289,7 @@ def main(argv=None):
     display = DisplayRepeater(ports, clock) if ports else None
 
     engine = Engine(link, clock, Registry(clock, cfg['scales'], excluded=cfg['excluded']), watchdog, commander,
-                    backend=VenusBackend(bus), expected_units=args.expected, control_enabled=args.control,
+                    backend=VenusBackend(bus, connection=connection_label(args.interface)), expected_units=args.expected, control_enabled=args.control,
                     capture=capture, link_manager=lm, dcsource=args.dcsource, names=cfg['names'],
                     quiet_start_s=args.quiet_start, display=display,
                     bench_age=lambda: marker_age(BENCH_MARKER))

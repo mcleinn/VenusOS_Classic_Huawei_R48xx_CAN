@@ -96,6 +96,14 @@ class TestGovernor(unittest.TestCase):
             self.assertEqual(req.current_a, 0.0)
             self.assertIn('operator switch off', req.reasons)
             self.inputs.mode_on = True
+            # display pause: a reason while in force, gone once the hold has run out
+            self.inputs.pause_until = self.clock() + C.PAUSE_HOLD_S
+            req = gov.compute(self.m, self.inputs)
+            self.assertEqual(req.current_a, 0.0)
+            self.assertIn('paused from the display', req.reasons)
+            self.assertTrue(self.inputs.paused(self.clock()))
+            self.assertFalse(self.inputs.paused(self.clock() + C.PAUSE_HOLD_S + 1))
+            self.inputs.pause_until = 0.0
             # watchdog stale
             self.clock.advance(20.0)
             self.inputs.link_current_t = self.clock()

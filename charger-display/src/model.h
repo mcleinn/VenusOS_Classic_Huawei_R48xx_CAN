@@ -58,6 +58,14 @@ struct Model {
     Sample chg_current, chg_voltage, chg_power, chg_temp;
     Sample link_limit, ac_power, ac_voltage, ac_current, ac_freq;
     Sample hw_sent_current, hw_ack_ok, hw_fault;
+    Sample hw_paused;                    // /Huawei/Paused as the driver reports it
+
+    // Pause page: the pause lives in this display only (RAM). While wanted it is re-sent to the
+    // driver every 20 s; the driver drops it 90 s after the last request, so switching the display
+    // off, rebooting it or losing the link ends the pause by itself.
+    bool pause_wanted = false;
+    uint32_t pause_sent_t = 0;
+    uint32_t pause_counter = 0;
 
     // CAN listener (Huawei bus, decoded both directions)
     int can_addr = 0;

@@ -1,4 +1,9 @@
-"""CAN transport for the Huawei driver on Venus OS v2.92 (Python 3.8, no python-can).
+"""CAN transport for the Huawei driver on Venus OS (v2.92 / Python 3.8 and v3.x / Python 3.12; no python-can).
+
+Platforms (2026-11-19): the Cerbo GX (Venus v2.92) has the rectifiers on its VE.Can port, interface
+`can0`; the Raspberry Pi 5 stand-in (Venus v3.85) has them on channel 2 of a gs_usb CAN adapter. Both
+are the same code: the interface comes from the config / `--interface`, either as a name or as
+`<driver>:<dev_id>` (`gs_usb:1`), see `resolve_interface()`.
 
 Three things live here:
 
@@ -55,6 +60,47 @@ def iface_driver(ifname, readlink=os.readlink, root=SYSFS_NET):
         return os.path.basename(readlink(os.path.join(root, ifname, 'device', 'driver')).replace('\\', '/'))
     except OSError:
         return None
+
+
+def iface_dev_id(ifname, read=None, root=SYSFS_NET):
+    """The kernel's `dev_id` of an interface as an int: for a gs_usb adapter this is the channel
+    index (0 = first channel, 1 = second), stable across reboots, unlike the can0/can1 names.
+    None when the interface has no such attribute."""
+    def _read(path):
+        with open(path) as fh:
+            return fh.read()
+    try:
+        return int((read or _read)(os.path.join(root, ifname, 'dev_id')).strip(), 0)
+    except (OSError, ValueError):
+        return None
+
+
+def resolve_interface(spec, root=SYSFS_NET, listdir=os.listdir, readlink=os.readlink, read=None):
+    """Turn an interface spec into a kernel interface name.
+
+    `spec` is either a plain name ('can0', 'can1') or '<driver>:<dev_id>' ('gs_usb:1' = channel 2
+    of a USB gs_usb adapter). Names follow probe order and can shift (Venus v3.x on a Raspberry
+    Pi: the CANable's two channels are can0/can1, which one is which depends on enumeration), so
+    the driver is pointed at the hardware, not at a name. Raises CanError when no interface or
+    more than one interface matches, so the driver never guesses which bus it opens."""
+    if ':' not in spec:
+        return spec
+    drv, _, ident = spec.partition(':')
+    try:
+        want = int(ident, 0)
+    except ValueError:
+        raise CanError('interface spec %r: expected <driver>:<dev_id>' % spec)
+    try:
+        names = sorted(n for n in listdir(root) if n.startswith('can') or n.startswith('vcan'))
+    except OSError as e:
+        raise CanError('cannot list %s: %s' % (root, e))
+    hits = [n for n in names
+            if iface_driver(n, readlink, root) == drv and iface_dev_id(n, read, root) == want]
+    if not hits:
+        raise CanError('no CAN interface with driver %r and dev_id %d (have: %s)' % (drv, want, ', '.join(names) or 'none'))
+    if len(hits) > 1:
+        raise CanError('interface spec %r is ambiguous: %s (several adapters attached)' % (spec, ', '.join(hits)))
+    return hits[0]
 
 
 CAN_EFF_FLAG = 0x80000000
@@ -261,7 +307,11 @@ class LinkManager(object):
                 break
         m = re.search(r'bitrate (\d+)', out)
         up = bool(re.search(r'<[^>]*\bUP\b', out))
-        return {'up': up, 'state': state, 'bitrate': int(m.group(1)) if m else None, 'raw': out}
+        # `can <LISTEN-ONLY,...> state ...`: a leftover listen-only flag (e.g. from a passive capture)
+        # means the controller sends no ACK, and the units repeat their frames ~700 times a second
+        listen_only = bool(re.search(r'\bcan <[^>]*\bLISTEN-ONLY\b', out))
+        return {'up': up, 'state': state, 'bitrate': int(m.group(1)) if m else None,
+                'listen_only': listen_only, 'raw': out}
 
     def ensure_up(self):
         """Configure and raise the link. Raises CanError when the profile is not
@@ -271,12 +321,13 @@ class LinkManager(object):
         st = self.status()
         if st['state'] == 'MISSING':
             raise CanError('interface %s not found' % self.ifname)
-        if st['up'] and st['bitrate'] == self.bitrate and st['state'] not in ('BUS-OFF', 'STOPPED'):
+        if (st['up'] and st['bitrate'] == self.bitrate and st['state'] not in ('BUS-OFF', 'STOPPED')
+                and not st.get('listen_only')):
             return st
         steps = [
             ['ip', 'link', 'set', self.ifname, 'down'],
             ['ip', 'link', 'set', self.ifname, 'type', 'can', 'bitrate', str(self.bitrate),
-             'restart-ms', str(self.restart_ms)],
+             'restart-ms', str(self.restart_ms), 'listen-only', 'off'],
             ['ip', 'link', 'set', self.ifname, 'up'],
         ]
         for argv in steps:

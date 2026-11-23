@@ -25,3 +25,7 @@ Thumbs.db
 
 # Local working material kept out of the repository (evidence, backups, project notes)
 _local/
+
+# Installation-specific driver configs (serials, names): kept locally, never committed; use driver.example.json
+src/deploy/driver.json
+src/deploy/driver.pi.json

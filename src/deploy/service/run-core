@@ -17,4 +17,4 @@ else
 fi
 exec 2>&1
 cd /data/huawei/src/driver || exit 1
-exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u -m huawei.main --interface can0 --expected 2 --config /data/huawei/driver.json --log-level INFO $CONTROL
+exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u -m huawei.main --interface can0 --expected 2 --dcsource --config /data/huawei/driver.json --log-level INFO $CONTROL

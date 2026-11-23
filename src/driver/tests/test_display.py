@@ -319,20 +319,20 @@ class TestDisplay(unittest.TestCase):
         self.assertTrue(len(ups) >= 3)
 
     def test_display_config_parsing_and_cli(self):
-        self.assertEqual(parse_display_spec('can3=708a85b00972'), ('can3', {'serial': '708A85B00972', 'board_addr': 1}))
+        self.assertEqual(parse_display_spec('can3=0a0a0a0a0a01'), ('can3', {'serial': '0A0A0A0A0A01', 'board_addr': 1}))
         self.assertEqual(parse_display_spec('can2=0000000000B2:2'), ('can2', {'serial': '0000000000B2', 'board_addr': 2}))
-        for bad in ('can3', 'can3=XYZ', 'can3=708A85B0097', 'can0=708A85B00972', 'can3=708A85B00972:0',
-                    'can3=708A85B00972:x', '=708A85B00972'):
+        for bad in ('can3', 'can3=XYZ', 'can3=0A0A0A0A0A0', 'can0=0A0A0A0A0A01', 'can3=0A0A0A0A0A01:0',
+                    'can3=0A0A0A0A0A01:x', '=0A0A0A0A0A01'):
             with self.assertRaises(SystemExit):
                 parse_display_spec(bad)
         path = os.path.join(tempfile.mkdtemp(), 'driver.json')
         with open(path, 'w') as fh:
-            json.dump({'scales': {'708a85b00972': 'conservative'},
-                       'display': {'can3': {'serial': '708A85B00972', 'board_addr': 1},
+            json.dump({'scales': {'0a0a0a0a0a01': 'conservative'},
+                       'display': {'can3': {'serial': '0A0A0A0A0A01', 'board_addr': 1},
                                    'can2': {'serial': '0000000000B2'}}}, fh)
         cfg = load_config(path)
-        self.assertEqual(cfg['scales'], {'708A85B00972': 'conservative'})
-        self.assertEqual(cfg['display']['can3'], {'serial': '708A85B00972', 'board_addr': 1})
+        self.assertEqual(cfg['scales'], {'0A0A0A0A0A01': 'conservative'})
+        self.assertEqual(cfg['display']['can3'], {'serial': '0A0A0A0A0A01', 'board_addr': 1})
         self.assertEqual(cfg['display']['can2'], {'serial': '0000000000B2', 'board_addr': 1})
         cfg = load_config(path, ['can2=0000000000B2:2'])                 # CLI overrides per interface
         self.assertEqual(cfg['display']['can2']['board_addr'], 2)
@@ -345,3 +345,28 @@ class TestDisplay(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestInterfaceConfig(unittest.TestCase):
+    """driver.json 'interface' / 'device' keys (Venus v3.x on a Raspberry Pi: 'gs_usb:1')."""
+
+    def write(self, text):
+        import tempfile
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, 'driver.json')
+        with open(p, 'w') as fh:
+            fh.write(text)
+        return p
+
+    def test_interface_and_device_keys_are_read(self):
+        cfg = load_config(self.write('{"interface": "gs_usb:1", "device": "1-1.2:1.0"}'))
+        self.assertEqual((cfg['interface'], cfg['device']), ('gs_usb:1', '1-1.2:1.0'))
+
+    def test_defaults_are_none_so_the_cerbo_falls_back_to_can0(self):
+        cfg = load_config(self.write('{}'))
+        self.assertEqual((cfg['interface'], cfg['device']), (None, None))
+        self.assertEqual((load_config(None)['interface'], load_config(None)['device']), (None, None))
+
+    def test_connection_label(self):
+        from huawei.main import connection_label
+        self.assertEqual(connection_label('can1'), 'CAN socket can1')      # no sysfs on the test host

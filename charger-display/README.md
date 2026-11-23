@@ -8,6 +8,11 @@ Data sources:
 
 - Cerbo GX over MQTT (Venus `dbus-mqtt`, plain MQTT on port 1883 inside the house network).
 - Huawei R48xx over CAN (listen-only TJA1051T/3), build flag `CAN_ENABLED`; display 2 is built without it since 2026-11-22.
+- **Pause page** (page 2, since 2026-11-23): one big button that blocks this display's charger (and only that one) by
+  writing `W/<portal>/charger/<instance>/Huawei/PauseRequest` to the Venus driver. The block is held by the display
+  (re-sent every 20 s) and lapses in the driver 90 s after the display stops, so it ends when the display is switched
+  off. Lifting it lifts only the block; whether the unit charges again is DVCC's and the operator switch's business.
+  Under the button: allowed current -> actual current and the watts, pulsing while charging. Also `GET /pause?on=1|0`.
 
 Style guide: Victron GUI v2 (`ref/gui-v2`, shallow clone of github.com/victronenergy/gui-v2,
 git-ignored). Only the colours, proportions and wording are borrowed; the UI is LVGL 8.4.

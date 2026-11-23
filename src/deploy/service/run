@@ -72,4 +72,4 @@ done
 echo "CAN ports: can0=$(dev can0)/$(drv can0) can1=$(drv can1) can2=$(drv can2) can3=$(drv can3)"
 
 cd /data/huawei/src/driver || exit 1
-exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u -m huawei.main --interface can0 --device "$VECAN_DEV" --expected 2 --config /data/huawei/driver.json --log-level INFO $CONTROL
+exec softlimit -d 100000000 -s 1000000 -a 100000000 python3 -u -m huawei.main --interface can0 --device "$VECAN_DEV" --expected 2 --dcsource --config /data/huawei/driver.json --log-level INFO $CONTROL

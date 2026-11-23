@@ -23,6 +23,7 @@ import logging
 import os
 
 from . import modules as M
+from .control import PAUSE_HOLD_S
 from . import VERSION
 
 log = logging.getLogger('huawei.dbus')
@@ -50,10 +51,14 @@ def _amps_text(path, value):
         return str(value)
 
 
-class VenusBackend(object):
-    """Real objects on the Cerbo (velib_python)."""
+DEFAULT_CONNECTION = 'VE.Can socket can0'
 
-    def __init__(self, bus):
+
+class VenusBackend(object):
+    """Real objects on a GX device (velib_python of Venus v2.92 and v3.x). `connection` is the
+    /Mgmt/Connection text of every service (which interface the units are on)."""
+
+    def __init__(self, bus, connection=DEFAULT_CONNECTION):
         import dbus
         from vedbus import VeDbusService
         from settingsdevice import SettingsDevice
@@ -61,10 +66,31 @@ class VenusBackend(object):
         self._VeDbusService = VeDbusService
         self._SettingsDevice = SettingsDevice
         self.bus = bus
+        self.connection = connection
 
     def make_service(self, name):
+        """Venus v3.x velib_python wants `register=False` and a later `register()` (the old
+        constructor registers at once and logs 'USING OUTDATED REGISTRATION METHOD'); v2.92's
+        constructor has no such argument. Detect it, call `finish_service()` when all paths exist."""
         conn = self._dbus.SystemBus(private=True)
-        return self._VeDbusService(name, conn)
+        if self._deferred_register():
+            svc = self._VeDbusService(name, conn, register=False)
+            svc._huawei_deferred = True
+        else:
+            svc = self._VeDbusService(name, conn)
+        return svc
+
+    def _deferred_register(self):
+        import inspect
+        try:
+            return 'register' in inspect.signature(self._VeDbusService.__init__).parameters
+        except (TypeError, ValueError):
+            return False
+
+    def finish_service(self, svc):
+        if getattr(svc, '_huawei_deferred', False):
+            svc._huawei_deferred = False
+            svc.register()
 
     def make_settings(self, supported, callback):
         return self._SettingsDevice(self.bus, supported, callback, timeout=30)
@@ -122,13 +148,17 @@ class FakeSettings(dict):
 
 
 class FakeBackend(object):
-    def __init__(self):
+    def __init__(self, connection=DEFAULT_CONNECTION):
         self.services = {}
+        self.connection = connection
 
     def make_service(self, name):
         s = FakeService(name)
         self.services[name] = s
         return s
+
+    def finish_service(self, svc):
+        pass
 
     def make_settings(self, supported, callback):
         return FakeSettings(supported, callback)
@@ -141,7 +171,10 @@ def _product_name(module):
 # ------------------------------------------------------------ charger service
 class ChargerService(object):
     def __init__(self, module, inputs, watchdog, backend, custom_name=None, dcsource=False,
-                 process_name='huawei-charger', connection='VE.Can socket can0', display_port=None):
+                 process_name='huawei-charger', connection=None, display_port=None):
+        if connection is None:
+            connection = getattr(backend, 'connection', DEFAULT_CONNECTION)
+        self.connection = connection
         self.module = module
         self.inputs = inputs
         self.watchdog = watchdog
@@ -194,6 +227,10 @@ class ChargerService(object):
         add('/Link/ChargeVoltage', None, writeable=True, onchangecallback=self._link_voltage)
         add('/Link/NetworkMode', None, writeable=True, onchangecallback=self._link_networkmode)
         add('/Huawei/Heartbeat', None, writeable=True, onchangecallback=self._heartbeat)
+        # Temporary pause from a display (MQTT W/.../Huawei/PauseRequest): non-zero = hold PAUSE_HOLD_S,
+        # 0 = release. The display sends a changing counter because vedbus drops a repeated value.
+        add('/Huawei/PauseRequest', 0, writeable=True, onchangecallback=self._pause_write)
+        add('/Huawei/Paused', 0)
         add('/Huawei/CommandAgeSeconds', None)
         add('/Huawei/State', STATE_TEXT[module.state])
         add('/Huawei/LimitingReason', module.inhibit_reason)
@@ -225,9 +262,15 @@ class ChargerService(object):
         add('/Alarms/LowVoltage', ALARM_OK)
         add('/Alarms/HighVoltage', ALARM_OK)
         self.dcsvc = None
+        self._finish(self.svc)
         if dcsource:
             self._make_dcsource(serial)
         log.info('%s: charger service up, instance %d', serial, instance)
+
+    def _finish(self, svc):
+        finish = getattr(self.backend, 'finish_service', None)
+        if finish is not None:
+            finish(svc)
 
     def _make_dcsource(self, serial):
         dkey = 'huawei_%s_dcsource' % serial
@@ -237,7 +280,7 @@ class ChargerService(object):
         dinstance = int(str(self.dcsettings['instance']).split(':')[1])
         self.dcsvc = self.backend.make_service('com.victronenergy.dcsource.huawei_%s' % serial)
         self.dcsvc.add_mandatory_paths(
-            processname='huawei-charger', processversion=VERSION, connection='VE.Can socket can0',
+            processname='huawei-charger', processversion=VERSION, connection=self.connection,
             deviceinstance=dinstance, productid=PRODUCT_ID, productname=_product_name(self.module) + ' (DC source view)',
             firmwareversion='-', hardwareversion='-', connected=1)
         dadd = self.dcsvc.add_path
@@ -251,6 +294,7 @@ class ChargerService(object):
         dadd('/Dc/0/Temperature', None)
         dadd('/Alarms/LowVoltage', ALARM_OK)
         dadd('/Alarms/HighVoltage', ALARM_OK)
+        self._finish(self.dcsvc)
 
     # ------------------------------------------------------------ callbacks
     def _setting_changed(self, setting, old, new):
@@ -308,6 +352,21 @@ class ChargerService(object):
         self.watchdog.feed_heartbeat(value)
         return True
 
+    def _pause_write(self, path, value):
+        """A display asserts a temporary pause: any non-zero write holds the unit at 0 A for
+        PAUSE_HOLD_S and has to be repeated to stay in force; 0 releases at once. Not persisted:
+        a display that is switched off lets the pause run out by itself."""
+        try:
+            value = int(float(value))
+        except (TypeError, ValueError):
+            return False
+        now = self.module.clock()
+        was = self.inputs.paused(now)
+        self.inputs.pause_until = (now + PAUSE_HOLD_S) if value else 0.0
+        if was != self.inputs.paused(now):
+            log.info('%s: display pause %s (request %s)', self.module.serial, 'ON' if value else 'released', value)
+        return True
+
     # --------------------------------------------------------------- update
     def update(self, now):
         m = self.module
@@ -332,6 +391,7 @@ class ChargerService(object):
         s['/Huawei/Fault'] = m.fault
         oo = m.output_on()
         s['/Huawei/OutputOn'] = None if oo is None else int(oo)
+        s['/Huawei/Paused'] = int(self.inputs.paused(now))
         s['/Huawei/BenchWindow'] = int(m.external_master)
         if self.display_port is not None:
             p = self.display_port

@@ -55,6 +55,10 @@ from . import modules as M
 log = logging.getLogger('huawei.control')
 
 HEARTBEAT_TIMEOUT_S = 10.0
+# A display may pause its charger (/Huawei/PauseRequest): the pause holds this long after the last
+# request and must be repeated to stay in force. Nothing is persisted, so a display that is switched
+# off or rebooted lets the pause lapse by itself (user requirement 2026-11-23: temporary pause).
+PAUSE_HOLD_S = 90.0
 RAMP_UP_A_PER_S = 5.0
 VOLTAGE_MIN_V = 41.0
 VOLTAGE_MAX_V = 55.2
@@ -126,6 +130,10 @@ class Inputs(object):
         self.network_mode = None
         self.mode_on = False        # /Mode 1 = on, 4 = off (operator)
         self.ccl = 0.0              # /Settings/ChargeCurrentLimit (per-unit cap, A)
+        self.pause_until = 0.0      # display pause: in force while now < pause_until (see PAUSE_HOLD_S)
+
+    def paused(self, now):
+        return bool(self.pause_until) and now < self.pause_until
 
 
 class Request(object):
@@ -170,6 +178,8 @@ class Governor(object):
             reasons.append(wd)
         if not inputs.mode_on:
             reasons.append('operator switch off')
+        if inputs.paused(now):
+            reasons.append('paused from the display')
         if module.default_ok is None:
             reasons.append('stored default limit not seen yet')
         elif module.default_ok is False:

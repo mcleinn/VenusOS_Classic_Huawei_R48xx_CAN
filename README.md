@@ -47,7 +47,7 @@ The driver runs on two firmwares from the same code; only the interface selectio
 | --- | --- | --- |
 | Venus OS / Python | v2.92 / 3.8 | v3.85 / 3.12 |
 | Rectifier bus | VE.Can port, `can0` (SoC controller `1c2bc00.can`) | channel 2 of a gs_usb CAN adapter (CANable 2.5), `gs_usb:1` |
-| `driver.json` | `src/deploy/driver.json` (`interface` unset = `can0`) | `src/deploy/driver.pi.json` (`"interface": "gs_usb:1"`) |
+| `driver.json` | from `src/deploy/driver.example.json` (`interface` unset = `can0`) | from `src/deploy/driver.example.json` with `"interface": "gs_usb:1"` |
 | Service script | `src/deploy/service/run` (or `run-core`) | `src/deploy/service/run-pi` |
 | DVCC extension (control) | `src/patch/2.103-1/`, installed 2026-10-22 | `src/patch/2.257-1/`, installed 2026-11-23 (port record `docs/DVCC_Port_Venus_3.85_Assessment.md`) |
 | Venus CAN profile of that port | Disabled (0) | Disabled (0) |
@@ -136,7 +136,7 @@ The design and the measured facts it rests on are written up in the documents li
 | `src/driver/huawei/` | The driver package (`canbus`, `protocol`, `modules`, `control`, `engine`, `dbus_services`, `main`; `display` is the optional repeater) |
 | `src/driver/tests/` | 125 tests with a synchronous PSU simulator and a control-board simulator on an in-process bus |
 | `src/driver/README.md` | Dated engineering notes: what each unit taught the driver, every build since 0.7 |
-| `src/deploy/` | What goes to `/data/huawei` on the Cerbo: service scripts, `boot.sh`, `driver.example.json`, the operator tools; plus the test installation's own `driver.json`, `run` and `huawei-usbcan.conf` (with the optional boards) |
+| `src/deploy/` | What goes to `/data/huawei` on the Cerbo: service scripts, `boot.sh`, `driver.example.json`, the operator tools; plus the test installation's `run` and `huawei-usbcan.conf` (with the optional boards); the installation's own `driver.json` files are git-ignored |
 | `src/patch/` | DVCC extension, one folder per `dbus-systemcalc-py` version (`2.103-1/` for Venus v2.92, `2.257-1/` for v3.85): `managedcharger.py`, `patched-dvcc.py`, the unified diff, `apply_hunks.py` (source of the hunks), `install.sh`, the pristine upstream tree with its tests (MIT); shared tests in `tests/` (`src/patch/README.md`) |
 | `src/classic-gui/` | Optional overview tile: modified QML, diffs, the files as found on the device, installer |
 | `docs/Design_Option1_DVCC_Patch.md` | Design and implementation record of the DVCC extension |
@@ -190,7 +190,7 @@ scp -r src/driver root@cerbo:/data/huawei/src/
 scp src/deploy/service/run-core root@cerbo:/data/huawei/service/run
 scp src/deploy/service/log/run   root@cerbo:/data/huawei/service/log/run
 scp src/deploy/driver.example.json root@cerbo:/data/huawei/driver.json
-scp src/deploy/boot.sh src/deploy/huawei-status.py src/deploy/huawei-ramp.py src/deploy/ramp-remote.sh src/deploy/bench-noload.py root@cerbo:/data/huawei/
+scp src/deploy/boot.sh src/deploy/huawei-status.py src/deploy/huawei-settings.py src/deploy/huawei-ramp.py src/deploy/ramp-remote.sh src/deploy/bench-noload.py root@cerbo:/data/huawei/
 V=2.103-1   # your dbus-systemcalc-py version: 2.103-1 on Venus v2.92, 2.257-1 on v3.85
 scp src/patch/$V/install.sh src/patch/$V/patched-dvcc.py src/patch/$V/managedcharger.py root@cerbo:/data/huawei/patch/
 ssh root@cerbo 'chmod +x /data/huawei/boot.sh /data/huawei/service/run /data/huawei/service/log/run \
@@ -287,15 +287,36 @@ original units received their 16 A during the load tests of 2026-11-03.
 
 ### 6. Enable control
 
-Per unit, set the limit and the operator switch (the switch is also on the charger's page in the
-Device List; `%` makes the Venus `dbus` tool send a number instead of a string):
+Four Venus **settings** decide whether anything charges, and a fresh installation has them at the
+safe defaults: the SOC ceiling for the managed chargers (90 / 85 %), the charger priority, each
+unit's current limit (0 A) and each unit's operator switch (off). They are persisted on
+`com.victronenergy.settings`, so they are not part of the files copied in step 1. Put the values
+you want into the `settings` block of `/data/huawei/driver.json` (see `driver.example.json`: SOC
+ceiling 100 / 98 = none, the BMS limit ends the charge; `charger_priority` 0 = Huaweis before the
+Multi, 1 = Multi first; `charge_current_limit` per serial; `mode_on` = serials to switch on) and
+apply them with the script, once the driver has shown the units (step 5):
 
 ```sh
-dbus -y com.victronenergy.charger.huawei_<serial> /Settings/ChargeCurrentLimit SetValue %50
-dbus -y com.victronenergy.charger.huawei_<serial> /Mode SetValue %1
+python3 /data/huawei/huawei-settings.py --check   # current vs wanted, changes nothing
+python3 /data/huawei/huawei-settings.py           # applies; idempotent, re-run any time
 touch /data/huawei/control-enabled
 svc -t /service/huawei-charger
 ```
+
+The same by hand (`%` makes the Venus `dbus` tool send a number instead of a string; the operator
+switch is also on the charger's page in the Device List):
+
+```sh
+dbus -y com.victronenergy.settings /Settings/Dvcc/ChargerMaxSoc SetValue %100
+dbus -y com.victronenergy.settings /Settings/Dvcc/ChargerResumeSoc SetValue %98
+dbus -y com.victronenergy.charger.huawei_<serial> /Settings/ChargeCurrentLimit SetValue %50
+dbus -y com.victronenergy.charger.huawei_<serial> /Mode SetValue %1
+```
+
+Why this is a step of its own (2026-11-23, Raspberry Pi): with the DVCC extension installed and
+the control marker present, the unit was budgeted and the overview tile appeared, but the unit
+delivered 0 A because its limit was still at the default 0, and before that the SOC ceiling at its
+default 90 % had given it no budget at 97 % SOC. Everything else was correct.
 
 Within about 10 s the unit shows `/State` 252, receives its share of the budget on
 `/Link/ChargeCurrent` and ramps at 5 A/s. `rm /data/huawei/control-enabled; svc -t
@@ -326,7 +347,7 @@ Venus profiles must be Disabled.
 ```sh
 scp src/deploy/service/run root@cerbo:/data/huawei/service/run     # replaces run-core
 scp src/deploy/huawei-usbcan.conf root@cerbo:/data/huawei/
-# add the "display" block to /data/huawei/driver.json (see src/deploy/driver.json), then
+# add the "display" block to /data/huawei/driver.json (see src/driver/README.md), then
 ssh root@cerbo '/data/huawei/boot.sh; svc -t /service/huawei-charger'
 ```
 
@@ -356,6 +377,7 @@ production dashboard has no box for AC chargers of any make.
 | Budget and allocation | `com.victronenergy.system /Dvcc/Chargers/Budget`, `/Count`, `/Active`, `/<n>/Power`; `/Control/ChargerChargeCurrent` |
 | Per-charger service | `com.victronenergy.charger.huawei_<serial>`: `/State` (252 = under DVCC control, 0 = must not deliver), `/Dc/0/*`, `/Ac/In/L1/*`, `/Link/*`, `/Mode`, `/Settings/ChargeCurrentLimit`, `/Alarms/*`, `/Huawei/*` (limiting reason, sent/acked/measured limit, output on, default verdict, heartbeat, command age) |
 | Why a unit is not charging | `/Huawei/LimitingReason` on its service, in plain words |
+| Temporary pause from a display | write a non-zero, changing value to `/Huawei/PauseRequest` (MQTT `W/<portal>/charger/<instance>/Huawei/PauseRequest`): the unit is held at 0 A for 90 s per request, `/Huawei/Paused` shows it; 0 releases. Not persisted: a display that stops re-sending lets it lapse (the charger-display's pause page does this) |
 | Return to a stock Cerbo | `svc -d /service/huawei-charger`, remove the `boot.sh` line from `/data/rc.local`, `install.sh rollback`, GUI rollback if installed, VE.Can profile back as it was |
 
 ## Safety rules the code follows

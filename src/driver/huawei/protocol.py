@@ -4,7 +4,7 @@ Ported 2026-10-23 from the user's rsh harness (`rs485harness/protocols/huawei_r4
 ids.py + regs.py) and its source-cited notes (`docs/refs/huawei/NOTES.md`); updated
 2026-11-01 with what the bench (harness docs/PHASE-B-RUNBOOK.md, 2026-10-25) and the
 Cerbo's first contact (evidence_cerbo_usb_adapter_first_contact.txt) measured on unit 1,
-an R4875G5, serial 708A85B00972. Pure functions: no state, no I/O.
+an R4875G5 (unit 1 of the test installation). Pure functions: no state, no I/O.
 
 VERIFICATION STATUS: `VERIFIED = False`. `MEASURED` lists what unit 1 confirmed,
 `UNVERIFIED` what still rests on community sources. The flag stays False until the
@@ -23,7 +23,7 @@ Identifier layout (29 bit), confirmed identical in five independent implementati
 # from control by configuration (driver.json "excluded"), not by this flag.
 VERIFIED = True
 MEASURED = [
-    'unit 2 = R4875G1 E4308598A003, 75.0 A (GET 0x88); 0x75 carries the output voltage on this model',
+    'unit 2 = R4875G1, 75.0 A (GET 0x88); 0x75 carries the output voltage on this model',
     'R4875G1: 0x76 = on-line raw/1024 while polled (68 -> 0.066), stored default after fallback (0 after B3.0 2026-11-02)',
     'R4875G1: on-line 0 A with no load keeps the output regulated at the set voltage; after 60-90 s silence with default 0 A the output is off and the terminals bleed',
     'two unterminated stubs from the Cerbo sockets (terminator removed) = bit-stuffing error storm, no frame for two hours; terminate at the charger ends',
@@ -226,7 +226,7 @@ CURRENT_SCALES = {
     'x30': CurrentScale('x30', False, 'BotoX, craigpeacock Protocol.xlsx'),
     # not a reading of the unit but a policy for the time before calibrate-current has been
     # run with a load: send the smallest raw of all readings, report the worst case back.
-    # Bound to serial 708A85B00972 by the harness on 2026-10-25 (set --current 10 -> raw 148 acked).
+    # Bound to unit 1 (R4875G5) by the harness on 2026-10-25 (set --current 10 -> raw 148 acked).
     'conservative': CurrentScale('conservative', True, 'harness policy: min raw of ratio1024/x20/x30'),
 }
 

@@ -37,7 +37,7 @@ class TestIdentifiers(unittest.TestCase):
 
 
 class TestMeasuredOnUnit1(unittest.TestCase):
-    """Frames exactly as charger 1 (R4875G5, 708A85B00972) sent them to the Cerbo on 2026-11-01."""
+    """Frames exactly as charger 1 (R4875G5, unit 1) sent them to the Cerbo on 2026-11-01."""
 
     def test_conservative_scale_matches_the_harness(self):
         sc = P.CURRENT_SCALES['conservative']
@@ -64,8 +64,8 @@ class TestMeasuredOnUnit1(unittest.TestCase):
     def test_info_characteristics_of_unit_1(self):
         d = P.decode(CanFrame(0x1081507F, bytes.fromhex('00010000408a10b3')))
         self.assertEqual(d['nominal_current_a'], 69.0)
-        d = P.decode(CanFrame(0x1081507F, bytes.fromhex('0002708a85b00972')))
-        self.assertEqual(d['serial_hex'], '708A85B00972')
+        d = P.decode(CanFrame(0x1081507F, bytes.fromhex('00020a0a0a0a0a01')))
+        self.assertEqual(d['serial_hex'], '0A0A0A0A0A01')
 
     def test_module_announce_frame_is_named(self):
         d = P.decode(CanFrame(0x108081FE, bytes([1, 0x13, 0, 1, 0, 0, 0, 0])))
