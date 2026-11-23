@@ -32,6 +32,7 @@ struct Model {
     Sample soc, batt_power, batt_voltage, batt_current, batt_time_to_go, batt_temp;
     Sample consumption, grid_power, genset_power, dc_charger_power, dc_system_power, ac_in_power;
     Sample system_state, active_in_source;
+    Sample dvcc_budget;                   // /Dvcc/Chargers/Budget: what DVCC hands to the managed chargers (A)
 
     // Multi / Quattro (com.victronenergy.vebus)
     Sample vebus_state, vebus_mode, vebus_in_v, vebus_in_f, vebus_out_v, vebus_out_f, vebus_in_limit;

@@ -45,6 +45,7 @@ static const char *const SUBS[] = {
     "system/0/Ac/Grid/L1/Power",
     "system/0/Ac/Genset/L1/Power",
     "system/0/Dc/Charger/Power",
+    "system/0/Dvcc/Chargers/Budget",
     "system/0/SystemState/State",
     "system/0/Ac/ActiveIn/Source",
     "charger/+/Connected",
@@ -106,6 +107,8 @@ static void copy_str(char *dst, size_t n, JsonVariantConst v)
     dst[n - 1] = 0;
 }
 
+static void publish_pause(bool on);
+
 static void on_message(char *topic, uint8_t *payload, unsigned int len)
 {
     if (strncmp(topic, s_prefix, s_prefix_len) != 0) return;
@@ -127,6 +130,7 @@ static void on_message(char *topic, uint8_t *payload, unsigned int len)
         else if (!strcmp(p, "Dc/Battery/Voltage"))        m.batt_voltage.set(f);
         else if (!strcmp(p, "Dc/Battery/Current"))        m.batt_current.set(f);
         else if (!strcmp(p, "Dc/Battery/TimeToGo"))       m.batt_time_to_go.set(f);
+        else if (!strcmp(p, "Dvcc/Chargers/Budget"))      m.dvcc_budget.set(f);
         else if (!strcmp(p, "Ac/Consumption/L1/Power"))   m.consumption.set(f);
         else if (!strcmp(p, "Ac/Grid/L1/Power"))          m.grid_power.set(f);
         else if (!strcmp(p, "Ac/Genset/L1/Power"))        m.genset_power.set(f);
@@ -184,6 +188,10 @@ static void on_message(char *topic, uint8_t *payload, unsigned int len)
                 m.link_limit = m.ac_power = m.ac_voltage = m.ac_current = m.ac_freq = Sample();
                 m.hw_sent_current = m.hw_ack_ok = m.hw_fault = m.hw_paused = Sample();
                 Serial.printf("mqtt: own charger '%s' is instance %d\n", OWN_CHARGER_NAME, inst);
+                // A fresh start lifts any block this display held before it went down (the driver would
+                // otherwise keep it for up to 90 s after the last request): one explicit release at boot.
+                static bool boot_released = false;
+                if (!boot_released && !m.pause_wanted) { boot_released = true; publish_pause(false); }
             }
         }
         // every charger's current and configured limit feed the total ring (slots by instance)

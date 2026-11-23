@@ -213,7 +213,12 @@ Nothing is persisted on either side: a display that is switched off, rebooted or
 The block concerns only the charger this display is assigned to (`OWN_CHARGER_NAME`). Lifting it does not start
 charging by itself: the operator switch, DVCC budget and BMS still decide. A swipe that starts on the button pages
 instead of toggling (distance check on press/release plus LVGL's scroll hand-over). Under the button:
-`<allowed> A -> <actual> A` (DVCC allowance while it hands one out, otherwise the unit's configured limit) and the watts,
+`<DVCC request> A -> <actual> A` (the left number is what DVCC requests from this unit; no quota reads 0 A; while this
+display's block is on, DVCC necessarily requests 0, so the display shows what it would hand out: the published budget
+capped by the unit's limit) and the watts,
 pulsing like the main page while charging, so a tap shows its effect at once. For tests over WLAN:
 `GET /pause?on=1|0` (basic auth `ota`), `GET /pause` returns the state. First live use 13:30 UTC on display 2 while the
 house was on a weak mains supply: Paused 1 in the driver within a second of the tap.
+A fresh start always lifts the block: the display sends one explicit release as soon as it knows its charger's
+instance (the driver would otherwise keep a pause for up to 90 s after the last request). User's rule 2026-11-23:
+"when starting new the block should be lifted".

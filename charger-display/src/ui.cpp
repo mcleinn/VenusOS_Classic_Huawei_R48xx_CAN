@@ -572,12 +572,17 @@ static void update_page_pause(const Model &m, bool fresh)
     const Sample &cur = live_current(m), &pwr = live_power(m);
     const bool chg_fresh = charger_data_fresh(m);
     const bool running = cur.has() && cur.v > 0.5f && chg_fresh;
-    // "should be": the DVCC allowance while it hands one out, otherwise the unit's configured limit
-    // (while blocked the DVCC gives 0, the limit is what the unit would get back)
-    float target = -1;
-    if (m.link_limit.has() && m.link_limit.v > 0.5f) target = m.link_limit.v;
-    else for (int i = 0; i < Model::MAX_CHARGERS; i++)
-        if (m.chargers[i].instance == m.charger_instance && m.chargers[i].limit.has()) target = m.chargers[i].limit.v;
+    // Left number = what DVCC requests from this unit (/Link/ChargeCurrent); no quota reads 0 A.
+    // While OUR block is on, DVCC necessarily requests 0 (the unit reports State 0), so the display
+    // shows what DVCC would hand out: its published budget capped by the unit's own limit.
+    float target = m.link_limit.has() ? m.link_limit.v : -1;
+    if (want && !(target > 0.5f) && m.dvcc_budget.has()) {
+        float limit = -1;
+        for (int i = 0; i < Model::MAX_CHARGERS; i++)
+            if (m.chargers[i].instance == m.charger_instance && m.chargers[i].limit.has()) limit = m.chargers[i].limit.v;
+        target = limit >= 0 ? fminf(m.dvcc_budget.v, limit) : m.dvcc_budget.v;
+    }
+    if (target < 0 && cur.has()) target = 0;
     if (target >= 0 && cur.has()) snprintf(buf, sizeof buf, "%d A " LV_SYMBOL_RIGHT " %.1f A", (int)lroundf(target), cur.v);
     else if (cur.has()) snprintf(buf, sizeof buf, "%.1f A", cur.v);
     else snprintf(buf, sizeof buf, "-- A");
